@@ -1,0 +1,16 @@
+[package]
+name = "sdkwork-lr-proxy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axum.workspace = true
+bytes.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-rustls.workspace = true
+hyper-util.workspace = true
+sdkwork-lr-core = { path = "../sdkwork-lr-core" }
+tracing.workspace = true
+urlencoding.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "sdkwork-lr-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aes-gcm = "0.10"
+anyhow.workspace = true
+base64 = "0.22"
+chrono.workspace = true
+rand = "0.8"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true

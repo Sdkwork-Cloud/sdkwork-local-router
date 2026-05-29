@@ -1,0 +1,161 @@
+use serde_json::{json, Value};
+
+pub fn transform_response(gemini_body: &Value, model: &str) -> Result<Value, String> {
+    let candidates = gemini_body.get("candidates").and_then(|v| v.as_array());
+    let first_candidate = candidates.and_then(|c| c.first());
+
+    let mut text_parts = Vec::new();
+    let mut tool_calls = Vec::new();
+
+    if let Some(candidate) = first_candidate {
+        if let Some(parts) = candidate.get("content").and_then(|c| c.get("parts")).and_then(|p| p.as_array()) {
+            for (idx, part) in parts.iter().enumerate() {
+                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                    text_parts.push(text.to_owned());
+                }
+
+                if let Some(fc) = part.get("functionCall") {
+                    let name = fc.get("name").and_then(|n| n.as_str()).unwrap_or("").to_owned();
+                    let args = fc.get("args").cloned().unwrap_or(json!({}));
+                    let arguments = serde_json::to_string(&args).unwrap_or_default();
+
+                    tool_calls.push(json!({
+                        "id": format!("call_{}", idx),
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": arguments
+                        },
+                        "index": idx
+                    }));
+                }
+            }
+        }
+    }
+
+    let text = text_parts.join("");
+    let mut finish_reason = first_candidate
+        .and_then(|c| c.get("finishReason").and_then(|v| v.as_str()))
+        .map(|r| match r {
+            "STOP" => "stop",
+            "MAX_TOKENS" => "length",
+            "SAFETY" | "RECITATION" | "BLOCKLIST" | "PROHIBITED_CONTENT" | "SPII"
+                | "MALFORMED_FUNCTION_CALL" => "content_filter",
+            _ => "stop",
+        })
+        .unwrap_or("stop");
+
+    if !tool_calls.is_empty() {
+        finish_reason = "tool_calls";
+    }
+
+    let mut message = json!({
+        "role": "assistant",
+        "content": if text.is_empty() && !tool_calls.is_empty() { Value::Null } else { Value::String(text) },
+    });
+
+    if !tool_calls.is_empty() {
+        message["tool_calls"] = json!(tool_calls);
+    }
+
+    let usage = gemini_body.get("usageMetadata").map(|u| {
+        json!({
+            "prompt_tokens": u.get("promptTokenCount").and_then(|v| v.as_u64()).unwrap_or(0),
+            "completion_tokens": u.get("candidatesTokenCount").and_then(|v| v.as_u64()).unwrap_or(0),
+            "total_tokens": u.get("totalTokenCount").and_then(|v| v.as_u64()).unwrap_or(0),
+        })
+    }).unwrap_or_else(|| json!({"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}));
+
+    Ok(json!({
+        "id": format!("chatcmpl-gemini-{}", uuid::Uuid::new_v4()),
+        "object": "chat.completion",
+        "created": unix_timestamp_secs(),
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "finish_reason": finish_reason,
+        }],
+        "usage": usage,
+    }))
+}
+
+fn unix_timestamp_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn text_response_conversion() {
+        let input = json!({
+            "candidates": [{
+                "content": {"parts": [{"text": "Hello from Gemini!"}], "role": "model"},
+                "finishReason": "STOP",
+                "index": 0
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5,
+                "totalTokenCount": 15
+            }
+        });
+        let result = transform_response(&input, "gemini-pro").unwrap();
+        assert_eq!(result["object"], "chat.completion");
+        assert_eq!(result["model"], "gemini-pro");
+        assert_eq!(result["choices"][0]["message"]["content"], "Hello from Gemini!");
+        assert_eq!(result["choices"][0]["finish_reason"], "stop");
+        assert_eq!(result["usage"]["prompt_tokens"], 10);
+        assert_eq!(result["usage"]["completion_tokens"], 5);
+        assert_eq!(result["usage"]["total_tokens"], 15);
+    }
+
+    #[test]
+    fn function_call_response_conversion() {
+        let input = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{"functionCall": {"name": "get_weather", "args": {"city": "NYC"}}}],
+                    "role": "model"
+                },
+                "finishReason": "STOP",
+                "index": 0
+            }]
+        });
+        let result = transform_response(&input, "gemini-pro").unwrap();
+        assert_eq!(result["choices"][0]["finish_reason"], "tool_calls");
+        let tool_calls = result["choices"][0]["message"]["tool_calls"].as_array().unwrap();
+        assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
+        let args: Value = serde_json::from_str(tool_calls[0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["city"], "NYC");
+    }
+
+    #[test]
+    fn max_tokens_finish_reason() {
+        let input = json!({
+            "candidates": [{
+                "content": {"parts": [{"text": "truncated..."}], "role": "model"},
+                "finishReason": "MAX_TOKENS",
+                "index": 0
+            }]
+        });
+        let result = transform_response(&input, "gemini-pro").unwrap();
+        assert_eq!(result["choices"][0]["finish_reason"], "length");
+    }
+
+    #[test]
+    fn empty_candidates() {
+        let input = json!({
+            "candidates": []
+        });
+        let result = transform_response(&input, "gemini-pro").unwrap();
+        assert_eq!(result["choices"][0]["message"]["content"], "");
+        assert_eq!(result["choices"][0]["finish_reason"], "stop");
+    }
+}

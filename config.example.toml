@@ -1,0 +1,97 @@
+﻿[server]
+bind = "127.0.0.1"
+port = 8080
+max_body_size_mb = 50
+
+[auth]
+mode = "none"
+api_keys = []
+
+[storage]
+database_url = "sqlite:./data/local-router.db?mode=rwc"
+# encryption_secret = "change-me-to-a-strong-secret"  # Or set SDKWORK_LR_ENCRYPTION_SECRET env var
+
+[logging]
+level = "info"
+format = "text"
+
+[base_paths]
+openai = "/v1"
+anthropic = "/anthropic"
+google = "/google"
+
+[fallback]
+enabled = true
+max_attempts = 3
+
+[rate_limit]
+enabled = false
+max_requests = 60
+window_secs = 60
+
+[cors]
+allowed_origins = ["http://localhost:*"]
+
+[routing]
+strategy = "priority"
+
+[recording]
+save_request_body = false
+save_response_body = false
+retention_days = 30
+
+[circuit_breaker]
+failure_threshold = 5
+success_threshold = 3
+open_duration_secs = 60
+half_open_max_requests = 2
+
+[health_probe]
+enabled = true
+interval_secs = 30
+probe_timeout_secs = 10
+
+[[upstreams]]
+name = "openai-direct"
+provider = "openai"
+base_url = "https://api.openai.com/v1"
+api_key = ""
+models = ["gpt-4o*", "gpt-4*", "o3*", "o4*"]
+priority = 10
+timeout_secs = 120
+max_retries = 2
+retry_delay_ms = 500
+
+[upstreams.model_aliases]
+"gpt-4o" = "gpt-4o-2024-08-06"
+
+[[upstreams]]
+name = "claude-direct"
+provider = "anthropic"
+base_url = "https://api.anthropic.com"
+api_key = ""
+models = ["claude-*"]
+priority = 10
+timeout_secs = 120
+anthropic_version = "2023-06-01"
+
+[upstreams.model_aliases]
+"claude-3.5-sonnet" = "claude-3-5-sonnet-20241022"
+
+[[upstreams]]
+name = "gemini-direct"
+provider = "google"
+base_url = "https://generativelanguage.googleapis.com"
+api_key = ""
+models = ["gemini-*"]
+priority = 10
+timeout_secs = 120
+
+[[upstreams]]
+name = "openai-compatible-proxy"
+provider = "openai"
+base_url = "https://your-proxy.example.com/v1"
+api_key = ""
+models = ["*"]
+priority = 100
+timeout_secs = 180
