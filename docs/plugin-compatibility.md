@@ -26,8 +26,8 @@ the runtime request context and is recorded in audit metadata as
 | API group | Runtime paths | Audience | Auth and user source |
 | --- | --- | --- | --- |
 | `local-router-open-api` | Provider-compatible proxy paths from `[base_paths]`, for example `/v1/{*path}`, `/anthropic/{*path}`, and `/google/{*path}` | Codex, Claude Code, Gemini CLI, OpenAI-compatible SDKs, and model clients | Database-backed `client_api_key`; `user_id` comes from `local_router_client_api_keys.user_id` |
-| `local-router-app-api` | `/app/v3/api/router/*` | SDKWork app clients and local/private app integrations | SDKWork auth/access tokens, JWT claims, or trusted subject headers |
-| `local-router-backend-api` | `/backend/v3/api/router/*` | Backend SDKs, admin consoles, operators, and control-plane services | SDKWork auth/access tokens, JWT claims, or trusted subject headers |
+| `local-router-app-api` | `/app/v3/api/local_router/*` | SDKWork app clients and local/private app integrations | SDKWork auth/access tokens, JWT claims, or trusted subject headers |
+| `local-router-backend-api` | `/backend/v3/api/local_router/*` | Backend SDKs, admin consoles, operators, and control-plane services | SDKWork auth/access tokens, JWT claims, or trusted subject headers |
 
 `local-router-open-api` preserves provider-compatible URL shapes because
 existing tools expect OpenAI, Anthropic, or Gemini-compatible paths. Its group
@@ -37,13 +37,13 @@ and SDK manifest purposes rather than a URL prefix.
 The machine-readable group manifest is available at:
 
 ```text
-GET /backend/v3/api/router/api_groups
+GET /backend/v3/api/local_router/api_groups
 ```
 
 The same `api_groups` array is also embedded in
-`/backend/v3/api/router/plugins` so third-party SDKs and admin tooling can read
-API grouping, plugin standards, interceptor stages, and routing strategies from
-one endpoint.
+`/backend/v3/api/local_router/plugins` so third-party SDKs and admin tooling can
+read API grouping, plugin standards, interceptor stages, and routing strategies
+from one endpoint.
 
 ## Canonical Plugin Names
 
@@ -59,12 +59,16 @@ Plugin IDs are uppercase and use concrete API surface names:
 - `GEMINI_GENERATE_CONTENT_TO_OPENAI_CHAT_COMPLETIONS_API`
 - `ANTHROPIC_MESSAGES_TO_OPENAI_RESPONSES_API`
 - `GEMINI_GENERATE_CONTENT_TO_OPENAI_RESPONSES_API`
+- `ANTHROPIC_MESSAGES_TO_GEMINI_GENERATE_CONTENT_API`
+- `GEMINI_GENERATE_CONTENT_TO_ANTHROPIC_MESSAGES_API`
 
-Legacy or informal aliases such as
+Documented aliases such as
 `OPENAI_COMPATIBLE_CHAT_TO_RESPONSE_API`,
-`OPENAI_COMPATIBLE_RESPONSE_TO_CLADUE_MESSAGE_API`,
+`OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGE_API`,
 `CLAUDE_MESSAGE_TO_OPENAI_CHAT_API`, and
 `GEMINI_MESSAGE_TO_OPENAI_RESPONSE_API` are normalized to canonical IDs.
+Misspelled plugin IDs are rejected; plugin manifests advertise only canonical
+IDs and documented aliases.
 
 ## API Surface Standard
 
@@ -150,16 +154,41 @@ surface to select a conversion plugin. The standard for new vendor data is:
 - `resourceCodes`: vendor-specific API resources.
 - `notes` and `source`: evidence for the compatibility claim.
 
-Resolver behavior is conservative:
+Resolver behavior is conservative and account-aware:
 
 - If `supportStatus` is `supported` or `partial`, `protocolCodes` contains a
   known API surface, and the incoming request route already uses that surface,
-  the router treats the vendor as natively compatible for that client API and
-  does not load a conversion plugin.
+  and the selected upstream account also uses that surface, the router treats
+  the vendor as natively compatible for that client API and does not load a
+  conversion plugin.
+- If the selected upstream account uses a standard protocol declared in
+  `ModelVendor.supportedProtocols`, the router may use that upstream surface
+  directly even when the model's default `apiFormat` is different. This covers
+  vendors such as DeepSeek and Zhipu/GLM where a model may default to
+  `openai_compatible` while the vendor also exposes an Anthropic-compatible
+  Messages endpoint for Claude Code. `apiFormat` is the default model surface,
+  not the only legal upstream protocol.
+- OpenAI Chat Completions and OpenAI Responses are both OpenAI-generation
+  surfaces. When choosing between those two, the router keeps the model
+  `apiFormat` preference so OpenAI Responses-native models are not
+  accidentally downgraded to Chat Completions just because the selected
+  upstream provider is OpenAI-compatible.
 - If support is `unsupported`, `unspecified`, or the incoming route does not
   match the declared client surface, the router uses the model's `apiFormat` as
-  the target surface and loads the canonical conversion plugin when source and
-  target differ.
+  the target surface unless the selected upstream surface is explicitly listed
+  in the vendor's `supportedProtocols`. It loads the canonical conversion
+  plugin when source and target differ.
+
+For example, DeepSeek `deepseek-v4-pro` and Zhipu/GLM `glm-5.1` currently use
+`apiFormat = openai_compatible` in `sdkwork-models`, and their
+`clientApiCompatibility.claude_code` entries are `unsupported` because they do
+not expose the Claude Code client API as a vendor-native client product. If the
+selected upstream account is OpenAI-compatible, Claude Code `/v1/messages`
+requests are converted with
+`ANTHROPIC_MESSAGES_TO_OPENAI_CHAT_COMPLETIONS_API`. If the selected upstream
+account is Anthropic Messages-compatible and that protocol is declared in
+`supportedProtocols`, the same Claude Code request is passed through without a
+plugin because the upstream surface already matches the client request surface.
 
 ## Runtime Decision Flow
 
@@ -179,7 +208,8 @@ For each proxied request:
 6. The compatibility resolver decides the target API surface.
 7. The router builds an `EffectivePluginDecision` from the model decision and
    runtime policy, then preflights the matching route in the plugin registry.
-8. The plugin maps path, request body, and non-streaming response body.
+8. The plugin maps path, request body, non-streaming response body, and
+   streaming SSE events when its route declares `capabilities.stream = true`.
 
 Provider-compatible `key=` query parameters are accepted only as local-router
 client API key input on proxy routes. The parameter name is matched
@@ -220,11 +250,80 @@ Supported policies:
   fail the request with HTTP 400 instead of forwarding the original body to an
   incompatible upstream API.
 - `passthrough`: disable API body/path conversion and keep the client API
-  surface. Model aliases configured on the upstream account still apply.
+  surface. Model route mappings configured on the upstream account still apply.
 - `force_transform`: ignore the model catalog target surface and convert to the
   selected upstream provider's default surface.
 
 `enabled = false` is equivalent to `policy = "passthrough"` at runtime.
+
+## Model Route Mapping
+
+Each upstream account can declare model route mappings as a client-model to
+upstream-model routing map. The durable runtime source is the
+`local_router_model_route_mappings` table, with the account-level
+`model_route_mappings` field used as the account create/update import surface.
+This lets a client tool keep a stable local model name such as `gpt-5.5` while
+the router sends the request to the provider's real model identifier, for
+example `gemini-2.5-pro`, `claude-sonnet-4-20250514`, or a dated OpenAI model id.
+
+The route mapping is applied consistently across the routing chain:
+
+- Account selection matches either the requested client model or the mapped
+  upstream model against the account's `models` patterns.
+- `sdkwork-models` compatibility decisions use the mapped upstream model, so
+  vendor support and plugin selection are based on the real provider model.
+- Upstream request paths use the mapped model for Gemini
+  `models/{model}:generateContent` routes.
+- Upstream JSON bodies use the mapped model for OpenAI Chat Completions,
+  OpenAI Responses, and Anthropic Messages targets when those bodies require a
+  `model` field.
+- Account create/update requests can synchronize the mapping rows from the
+  `model_route_mappings` object. Direct route-mapping management APIs can
+  update rows without replacing unrelated account configuration.
+
+Example:
+
+```toml
+[[upstreams]]
+name = "gemini-for-codex"
+provider = "google"
+base_url = "https://generativelanguage.googleapis.com"
+upstream_api_key = ""
+models = ["gemini-*"]
+
+[upstreams.model_route_mappings]
+"gpt-5.5" = "gemini-2.5-pro"
+```
+
+With that configuration, a Codex/OpenAI-compatible client can call
+`/v1/responses` or `/v1/chat/completions` with `"model": "gpt-5.5"`. The router
+selects the Gemini account, transforms the request when needed, and forwards it
+to `/v1/models/gemini-2.5-pro:generateContent` or
+`/v1/models/gemini-2.5-pro:streamGenerateContent?alt=sse`.
+
+Backend management APIs for real-time changes:
+
+```text
+GET    /backend/v3/api/local_router/model_route_mappings
+POST   /backend/v3/api/local_router/model_route_mappings
+DELETE /backend/v3/api/local_router/model_route_mappings/{modelRouteMappingId}
+```
+
+`POST /backend/v3/api/local_router/model_route_mappings` accepts:
+
+```json
+{
+  "account_id": 1,
+  "client_model": "gpt-5.5",
+  "upstream_model": "gemini-2.5-pro",
+  "enabled": true,
+  "notes": "Codex local GPT name to Gemini official model"
+}
+```
+
+The route upserts on `(user_id, account_id, client_model)`, increments the row
+`version` on updates, reloads the resolved user's account pool immediately, and
+never crosses user boundaries.
 
 ## Routing Strategy Standard
 
@@ -259,7 +358,7 @@ Supported routing strategies:
 Runtime strategy can be changed per resolved user scope with:
 
 ```text
-POST /backend/v3/api/router/strategy
+POST /backend/v3/api/local_router/strategy
 ```
 
 Request body:
@@ -275,9 +374,9 @@ resolved request context, `user_id`, strategy mode, old strategy, and new
 strategy. Explicit in-memory strategy overrides are preserved when that user's
 account pool is hot-reloaded from database records.
 
-`/backend/v3/api/router/plugins` exposes `routing_strategies`, so third-party
-management tools can read the available strategy contract without hard-coding
-it.
+`/backend/v3/api/local_router/plugins` exposes `routing_strategies`, so
+third-party management tools can read the available strategy contract without
+hard-coding it.
 
 ## Server Pipeline And Extension Points
 
@@ -352,7 +451,7 @@ Standard server components should map to the pipeline this way:
   request, routing, plugin, response, error, and token usage records into
   `local_router_` tables with user isolation.
 
-`/backend/v3/api/router/plugins` exposes `pipeline_stages` and
+`/backend/v3/api/local_router/plugins` exposes `pipeline_stages` and
 `standard_components` as machine-readable metadata for SDKs, backend admin
 tools, and third-party integrations. Each standard component declares whether a
 built-in implementation is available, whether it is enabled by default, the
@@ -376,15 +475,16 @@ headers:
 
 The browser CORS layer accepts the `x-sdkwork-client-api` request header and
 exposes these response headers together with `x-request-id`.
-`/app/v3/api/router/status` and `/backend/v3/api/router/plugins` also expose
-plugin enablement, policy, registry count, decision-header setting, and model
-catalog load status.
+`/app/v3/api/local_router/status` and
+`/backend/v3/api/local_router/plugins` also expose plugin enablement, policy,
+registry count, decision-header setting, and model catalog load status.
 
 ## User Isolation
 
 All local-router owned database tables use the `local_router_` prefix:
 
 - `local_router_upstream_accounts`
+- `local_router_model_route_mappings`
 - `local_router_client_api_keys`
 - `local_router_invocations`
 - `local_router_usages`
@@ -398,6 +498,25 @@ unique only within one user via `(user_id, name)`, so separate users can keep
 accounts with the same display name or provider shape. Invocation logs and
 token usage are filtered by `user_id` for every list and aggregate query.
 
+Model route mappings are stored as first-class user-owned rows in
+`local_router_model_route_mappings`:
+
+- `user_id`: owner scope, defaulting to `0` when no user context is present.
+- `account_id` and `account_name`: selected upstream account binding.
+- `client_model`: model name sent by Codex, Claude Code, Gemini CLI, or another
+  client.
+- `upstream_model`: real provider model sent upstream.
+- `enabled`, `notes`, `version`, `created_at`, and `updated_at`.
+- Unique key: `(user_id, account_id, client_model)`.
+- Foreign key: `(user_id, account_id)` references
+  `local_router_upstream_accounts(user_id, id)`, so the database also rejects
+  route mappings that point at another user's account.
+
+Deleting an upstream account removes its model route mapping rows. Renaming an
+upstream account refreshes the `account_name` snapshot without overwriting
+independently managed route mappings. Runtime reloads read enabled rows from
+this table and merge them with the account-level `model_route_mappings` object.
+
 There are two distinct key concepts:
 
 - `client_api_key`: the local-router/open-platform key accepted from client
@@ -407,6 +526,14 @@ There are two distinct key concepts:
   `local_router_upstream_accounts` and injected only when forwarding to
   OpenAI, Anthropic, Gemini, or another upstream. It must never be used to
   identify a local-router caller.
+- `upstream_auth_scheme`: optional account-level upstream credential injection
+  mode. Omit it for provider defaults (`openai`/custom use Bearer,
+  `anthropic` uses `x-api-key`, and `google` uses `x-goog-api-key`). Set it to
+  `bearer`, `x-api-key`, `x-goog-api-key`, or `query-key` when a
+  provider-compatible endpoint requires a different upstream auth shape. This
+  is required for some Anthropic-compatible non-Anthropic accounts, such as
+  DeepSeek/Z.AI Claude Code-compatible endpoints that document
+  `Authorization: Bearer`.
 
 Proxy/OpenAI/Claude/Gemini-compatible requests resolve `user_id` by looking up
 the presented `client_api_key` in `local_router_client_api_keys`. The key may
@@ -423,10 +550,10 @@ Local authentication is not configured through TOML. The local-router contract
 uses database-backed client API key records for proxy callers and SDKWork token
 context for app/backend callers.
 
-`/app/v3/api/router/status`, model listing, account APIs, health APIs, usage
-summary, and logs all include the resolved request context and read/write only
-data owned by that `user_id`. Runtime proxy traffic selects the same user's
-account pool after client API key authentication.
+`/app/v3/api/local_router/status`, model listing, account APIs, health APIs,
+usage summary, and logs all include the resolved request context and read/write
+only data owned by that `user_id`. Runtime proxy traffic selects the same
+user's account pool after client API key authentication.
 
 ## Invocation Records
 
@@ -450,7 +577,7 @@ metadata to audit routing and plugin decisions:
 Usage rows in `local_router_usages` also include `user_id`, so token totals and
 per-model aggregations remain user-isolated.
 
-`/backend/v3/api/router/plugins` additionally exposes:
+`/backend/v3/api/local_router/plugins` additionally exposes:
 
 - `api_groups`: the three local-router server API groups:
   `local-router-open-api`, `local-router-app-api`, and
@@ -471,7 +598,7 @@ per-model aggregations remain user-isolated.
 Third-party tools can preflight the exact model/client decision with:
 
 ```text
-GET /backend/v3/api/router/plugins/decision?model=<model>&client_api=<client>&source=<surface>&upstream=<surface>
+GET /backend/v3/api/local_router/plugins/decision?model=<model>&client_api=<client>&source=<surface>&upstream=<surface>
 ```
 
 Parameters:
@@ -542,12 +669,24 @@ unless they are part of the shared compatibility surface.
 
 Existing event-level streaming support remains available for OpenAI Chat
 Completions with Anthropic Messages and Gemini GenerateContent protocol pairs.
-OpenAI Responses streaming, Anthropic/Gemini direct event-level streaming, and
-Batch work-item expansion are represented in the standard, but they do not
-advertise `capabilities.stream = true` until complete event-level conversion is
-implemented. Runtime preflight returns HTTP 501 before upstream forwarding when
-a request requires streaming through a plugin that does not declare stream
-support.
+OpenAI Responses streaming is also supported for Codex-to-Claude and
+Codex-to-Gemini routing through
+`OPENAI_RESPONSES_TO_ANTHROPIC_MESSAGES_API` and
+`OPENAI_RESPONSES_TO_GEMINI_GENERATE_CONTENT_API`: Anthropic Messages SSE events
+and Gemini `streamGenerateContent` SSE chunks are converted back into OpenAI
+Responses events such as `response.created`, `response.in_progress`,
+`response.output_text.delta`, `response.function_call_arguments.delta`, and
+`response.completed`. Claude Code streaming to OpenAI Responses-native models
+and Gemini-native models is supported through
+`ANTHROPIC_MESSAGES_TO_OPENAI_RESPONSES_API` and
+`ANTHROPIC_MESSAGES_TO_GEMINI_GENERATE_CONTENT_API`, with upstream Responses or
+Gemini SSE chunks converted back to Anthropic Messages SSE events. Direct
+Gemini/Anthropic streaming conversion is also advertised for
+`GEMINI_GENERATE_CONTENT_TO_ANTHROPIC_MESSAGES_API` where event-level
+conversion is implemented. Batch work-item expansion remains represented in
+the standard but reserved; it does not advertise `capabilities.stream = true`.
+Runtime preflight returns HTTP 501 before upstream forwarding when a request
+requires streaming through a plugin that does not declare stream support.
 
 Anthropic upstream forwarding always sends an `anthropic-version` header for
 Messages API calls. Account-specific `anthropic_version` values take

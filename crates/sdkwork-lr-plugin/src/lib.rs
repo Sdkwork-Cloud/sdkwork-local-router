@@ -193,6 +193,7 @@ pub struct TransformContext {
     pub target_protocol: Protocol,
     pub client_path: String,
     pub client_base_path: String,
+    pub upstream_model: Option<String>,
     pub model: Option<String>,
     pub is_streaming: bool,
 }
@@ -374,20 +375,26 @@ impl<'a> ModelCompatibilityResolver<'a> {
         let vendor_support = compatibility
             .map(|entry| ClientSupportStatus::from_sdkwork_status(&entry.support_status))
             .unwrap_or(ClientSupportStatus::Unspecified);
-        let declared_client_surface = compatibility.and_then(|entry| {
-            entry
-                .protocol_codes
-                .iter()
-                .find_map(|code| ApiSurface::from_protocol_code(code))
-        });
+        let declared_client_surfaces = compatibility
+            .map(declared_client_surfaces)
+            .unwrap_or_default();
+        let declared_client_surface = select_declared_client_surface(
+            &declared_client_surfaces,
+            request_surface,
+            upstream_surface,
+        );
         let client_surface = declared_client_surface
             .or_else(|| ApiSurface::preferred_client_surface(&client_api_code))
             .unwrap_or(request_surface);
+        let vendor_supports_upstream_surface = vendor
+            .map(|vendor| vendor_supports_surface(vendor, upstream_surface))
+            .unwrap_or(false);
         let native_client_surface = if matches!(
             vendor_support,
             ClientSupportStatus::Supported | ClientSupportStatus::Partial
         ) && declared_client_surface.is_some()
             && request_surface == client_surface
+            && upstream_surface == client_surface
         {
             Some(client_surface)
         } else {
@@ -395,11 +402,11 @@ impl<'a> ModelCompatibilityResolver<'a> {
         };
 
         let target = native_client_surface.unwrap_or_else(|| {
-            if upstream_surface == model_surface {
-                upstream_surface
-            } else {
-                model_surface
-            }
+            select_model_target_surface(
+                model_surface,
+                upstream_surface,
+                vendor_supports_upstream_surface,
+            )
         });
         let source = request_surface;
 
@@ -413,6 +420,14 @@ impl<'a> ModelCompatibilityResolver<'a> {
             format!(
                 "vendor {} declares {:?} native support for client API {} via {}; no plugin required",
                 vendor_code, vendor_support, client_api_code, target
+            )
+        } else if plugin_id.is_none()
+            && vendor_supports_upstream_surface
+            && target == upstream_surface
+        {
+            format!(
+                "selected upstream surface {} is declared in vendor {} supportedProtocols; no plugin required",
+                target, vendor_code
             )
         } else if plugin_id.is_none() {
             format!(
@@ -447,6 +462,65 @@ impl<'a> ModelCompatibilityResolver<'a> {
             reason,
         }
     }
+}
+
+fn select_model_target_surface(
+    model_surface: ApiSurface,
+    upstream_surface: ApiSurface,
+    vendor_supports_upstream_surface: bool,
+) -> ApiSurface {
+    if upstream_surface == model_surface {
+        return upstream_surface;
+    }
+
+    if openai_generation_surface(model_surface) && openai_generation_surface(upstream_surface) {
+        return model_surface;
+    }
+
+    if vendor_supports_upstream_surface {
+        return upstream_surface;
+    }
+
+    model_surface
+}
+
+fn openai_generation_surface(surface: ApiSurface) -> bool {
+    matches!(
+        surface,
+        ApiSurface::OpenAiChatCompletions | ApiSurface::OpenAiResponses
+    )
+}
+
+fn vendor_supports_surface(vendor: &ModelVendor, surface: ApiSurface) -> bool {
+    vendor
+        .supported_protocols
+        .iter()
+        .any(|code| ApiSurface::from_protocol_code(code) == Some(surface))
+}
+
+fn declared_client_surfaces(compatibility: &ClientApiCompatibility) -> Vec<ApiSurface> {
+    compatibility
+        .protocol_codes
+        .iter()
+        .filter_map(|code| ApiSurface::from_protocol_code(code))
+        .collect()
+}
+
+fn select_declared_client_surface(
+    declared: &[ApiSurface],
+    request_surface: ApiSurface,
+    upstream_surface: ApiSurface,
+) -> Option<ApiSurface> {
+    if declared.contains(&request_surface) && declared.contains(&upstream_surface) {
+        return Some(request_surface);
+    }
+    if declared.contains(&request_surface) {
+        return Some(request_surface);
+    }
+    if declared.contains(&upstream_surface) {
+        return Some(upstream_surface);
+    }
+    declared.first().copied()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -694,8 +768,7 @@ pub fn normalize_plugin_id(id: &str) -> String {
         "OPENAI_COMPATIBLE_BATCH_TO_RESPONSE_API" => {
             canonical_plugin_id(ApiSurface::OpenAiBatch, ApiSurface::OpenAiResponses)
         }
-        "OPENAI_COMPATIBLE_RESPONSE_TO_CLADUE_MESSAGE_API"
-        | "OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGE_API"
+        "OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGE_API"
         | "OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGES_API"
         | "OPENAI_COMPATIBLE_RESPONSE_TO_ANTHROPIC_MESSAGE_API"
         | "OPENAI_COMPATIBLE_RESPONSE_TO_ANTHROPIC_MESSAGES_API" => {
@@ -775,7 +848,11 @@ pub fn map_standard_upstream_path(context: &TransformContext) -> String {
             if context.source == ApiSurface::GeminiGenerateContent {
                 ensure_leading_slash(&stripped)
             } else {
-                let model = context.model.as_deref().unwrap_or("gemini-pro");
+                let model = context
+                    .upstream_model
+                    .as_deref()
+                    .or(context.model.as_deref())
+                    .unwrap_or("gemini-pro");
                 if context.is_streaming {
                     format!("/v1/models/{model}:streamGenerateContent?alt=sse")
                 } else {
@@ -1213,7 +1290,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_policy_parses_standard_codes_and_legacy_spellings() {
+    fn plugin_policy_parses_standard_codes() {
         assert_eq!(PluginPolicy::from_code("auto"), Some(PluginPolicy::Auto));
         assert_eq!(
             PluginPolicy::from_code("strict"),
@@ -1227,7 +1304,7 @@ mod tests {
             PluginPolicy::from_code("force-plugin"),
             Some(PluginPolicy::ForceTransform)
         );
-        assert_eq!(PluginPolicy::from_code("legacy-shim"), None);
+        assert_eq!(PluginPolicy::from_code("invalid-shim"), None);
     }
 
     #[test]
@@ -1492,7 +1569,7 @@ mod tests {
             "OPENAI_CHAT_COMPLETIONS_TO_OPENAI_RESPONSES_API"
         );
         assert_eq!(
-            normalize_plugin_id("OPENAI_COMPATIBLE_RESPONSE_TO_CLADUE_MESSAGE_API"),
+            normalize_plugin_id("OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGE_API"),
             "OPENAI_RESPONSES_TO_ANTHROPIC_MESSAGES_API"
         );
         assert_eq!(
@@ -1576,6 +1653,7 @@ mod tests {
             target_protocol: Protocol::Openai,
             client_path: "/anthropic/v1/messages".to_owned(),
             client_base_path: "/anthropic".to_owned(),
+            upstream_model: None,
             model: Some("gpt-4o".to_owned()),
             is_streaming: false,
         };
@@ -1591,6 +1669,7 @@ mod tests {
             target_protocol: Protocol::Google,
             client_path: "/v1/responses".to_owned(),
             client_base_path: "/v1".to_owned(),
+            upstream_model: None,
             model: Some("gemini-2.5-pro".to_owned()),
             is_streaming: false,
         };
@@ -1609,6 +1688,7 @@ mod tests {
             target_protocol: Protocol::Openai,
             client_path: "/v1/files".to_owned(),
             client_base_path: "/v1".to_owned(),
+            upstream_model: None,
             model: None,
             is_streaming: false,
         };
@@ -1634,6 +1714,7 @@ mod tests {
             target_protocol: Protocol::Openai,
             client_path: "/v1/responses".to_owned(),
             client_base_path: "/v1".to_owned(),
+            upstream_model: None,
             model: None,
             is_streaming: false,
         };
@@ -1728,7 +1809,7 @@ mod tests {
             "gpt-4o-compatible",
             "codex",
             ApiSurface::OpenAiResponses,
-            ApiSurface::OpenAiChatCompletions,
+            ApiSurface::OpenAiResponses,
         );
 
         assert!(!decision.needs_plugin());
@@ -1737,6 +1818,123 @@ mod tests {
             decision.client_support_status,
             ClientSupportStatus::Supported
         );
+    }
+
+    #[test]
+    fn compatibility_resolver_does_not_passthrough_native_client_surface_when_upstream_differs() {
+        let catalog = catalog_with_vendor_model(
+            vendor(
+                "deepseek",
+                "DeepSeek",
+                &[("claude_code", "supported", &["anthropic_messages"])],
+                &["openai_compatible", "anthropic_messages"],
+            ),
+            model("deepseek-v4-pro", "deepseek", "openai_compatible"),
+        );
+        let resolver = ModelCompatibilityResolver::new(&catalog);
+
+        let decision = resolver.decide(
+            "deepseek-v4-pro",
+            "claude_code",
+            ApiSurface::AnthropicMessages,
+            ApiSurface::OpenAiChatCompletions,
+        );
+
+        assert_eq!(decision.vendor_code, "deepseek");
+        assert_eq!(
+            decision.client_support_status,
+            ClientSupportStatus::Supported
+        );
+        assert_eq!(decision.target, ApiSurface::OpenAiChatCompletions);
+        assert_eq!(
+            decision.plugin_id.as_deref(),
+            Some("ANTHROPIC_MESSAGES_TO_OPENAI_CHAT_COMPLETIONS_API")
+        );
+    }
+
+    #[test]
+    fn compatibility_resolver_uses_supported_upstream_surface_for_multi_protocol_vendor() {
+        let catalog = catalog_with_vendor_model(
+            vendor(
+                "deepseek",
+                "DeepSeek",
+                &[("claude_code", "unsupported", &[])],
+                &["openai_compatible", "anthropic_messages"],
+            ),
+            model("deepseek-v4-pro", "deepseek", "openai_compatible"),
+        );
+        let resolver = ModelCompatibilityResolver::new(&catalog);
+
+        let decision = resolver.decide(
+            "deepseek-v4-pro",
+            "claude_code",
+            ApiSurface::AnthropicMessages,
+            ApiSurface::AnthropicMessages,
+        );
+
+        assert_eq!(decision.vendor_code, "deepseek");
+        assert_eq!(
+            decision.client_support_status,
+            ClientSupportStatus::Unsupported
+        );
+        assert_eq!(decision.target, ApiSurface::AnthropicMessages);
+        assert_eq!(decision.plugin_id, None);
+    }
+
+    #[test]
+    fn compatibility_resolver_checks_all_declared_client_protocol_surfaces() {
+        let catalog = catalog_with_vendor_model(
+            vendor(
+                "multi",
+                "Multi Protocol",
+                &[(
+                    "codex",
+                    "supported",
+                    &["openai_compatible", "openai_responses"],
+                )],
+                &["openai_compatible", "openai_responses"],
+            ),
+            model("multi-chat-native", "multi", "openai_compatible"),
+        );
+        let resolver = ModelCompatibilityResolver::new(&catalog);
+
+        let decision = resolver.decide(
+            "multi-chat-native",
+            "codex",
+            ApiSurface::OpenAiResponses,
+            ApiSurface::OpenAiResponses,
+        );
+
+        assert_eq!(
+            decision.client_support_status,
+            ClientSupportStatus::Supported
+        );
+        assert_eq!(decision.client_surface, ApiSurface::OpenAiResponses);
+        assert_eq!(decision.target, ApiSurface::OpenAiResponses);
+        assert_eq!(decision.plugin_id, None);
+    }
+
+    #[test]
+    fn compatibility_resolver_honors_bundled_deepseek_and_chatglm_direct_anthropic_support() {
+        let catalog = sdkwork_models::load_bundled_catalog().expect("bundled catalog loads");
+        let resolver = ModelCompatibilityResolver::new(&catalog);
+
+        for (model_id, vendor_code) in [("deepseek-v4-pro", "deepseek"), ("glm-5.1", "zhipu")] {
+            let decision = resolver.decide(
+                model_id,
+                "claude_code",
+                ApiSurface::AnthropicMessages,
+                ApiSurface::AnthropicMessages,
+            );
+
+            assert_eq!(decision.vendor_code, vendor_code);
+            assert_eq!(decision.target, ApiSurface::AnthropicMessages);
+            assert_eq!(
+                decision.client_support_status,
+                ClientSupportStatus::Unsupported
+            );
+            assert_eq!(decision.plugin_id, None);
+        }
     }
 
     #[test]

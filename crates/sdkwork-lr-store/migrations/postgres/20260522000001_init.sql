@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS local_router_upstream_accounts (
     retry_delay_ms      BIGINT       NOT NULL DEFAULT 500,
     anthropic_version   VARCHAR(32),
     default_headers     JSONB        DEFAULT '{}',
-    model_aliases       JSONB        DEFAULT '{}',
+    model_route_mappings JSONB       DEFAULT '{}',
     enabled             BOOLEAN      NOT NULL DEFAULT TRUE,
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),

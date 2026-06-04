@@ -69,11 +69,7 @@ pub fn transform_request(openai_body: &Value) -> Result<Value, String> {
             "assistant" => {
                 let mut parts = Vec::new();
 
-                if let Some(text) = content.as_str() {
-                    if !text.is_empty() {
-                        parts.push(json!({"text": text}));
-                    }
-                }
+                parts.extend(extract_parts_vec(&content));
 
                 if let Some(tool_calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
                     for tc in tool_calls {
@@ -112,25 +108,33 @@ pub fn transform_request(openai_body: &Value) -> Result<Value, String> {
                     .get("tool_call_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let tool_content = content.as_str().unwrap_or("");
                 let function_name = tool_call_map
                     .get(tool_call_id)
                     .cloned()
                     .unwrap_or_else(|| tool_call_id.to_owned());
 
                 let mut function_response_parts = Vec::new();
-                if let Ok(parsed) = serde_json::from_str::<Value>(tool_content) {
-                    function_response_parts.push(json!({
-                        "functionResponse": {
-                            "name": function_name,
-                            "response": parsed
-                        }
-                    }));
+                if let Some(tool_content) = content.as_str() {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(tool_content) {
+                        function_response_parts.push(json!({
+                            "functionResponse": {
+                                "name": function_name,
+                                "response": parsed
+                            }
+                        }));
+                    } else {
+                        function_response_parts.push(json!({
+                            "functionResponse": {
+                                "name": function_name,
+                                "response": {"result": tool_content}
+                            }
+                        }));
+                    }
                 } else {
                     function_response_parts.push(json!({
                         "functionResponse": {
                             "name": function_name,
-                            "response": {"result": tool_content}
+                            "response": content
                         }
                     }));
                 }
@@ -268,19 +272,23 @@ fn merge_consecutive_user_roles(contents: Vec<Value>) -> Vec<Value> {
 }
 
 fn extract_parts(content: &Value) -> Value {
+    Value::Array(extract_parts_vec(content))
+}
+
+fn extract_parts_vec(content: &Value) -> Vec<Value> {
     if let Some(text) = content.as_str() {
-        json!([{"text": text}])
+        vec![json!({"text": text})]
     } else if content.is_array() {
-        Value::Array(
-            content
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(openai_content_part_to_gemini_part)
-                .collect(),
-        )
+        content
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(openai_content_part_to_gemini_part)
+            .collect()
+    } else if content.is_null() {
+        Vec::new()
     } else {
-        json!([{"text": content.to_string()}])
+        vec![json!({"text": content.to_string()})]
     }
 }
 
@@ -472,6 +480,49 @@ mod tests {
             parts[1],
             json!({"inlineData": {"mimeType": "image/png", "data": "aGVsbG8="}})
         );
+    }
+
+    #[test]
+    fn assistant_content_parts_are_converted_to_gemini_parts() {
+        let input = json!({
+            "model": "gpt-4o",
+            "messages": [{
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I checked the file."},
+                    {"type": "text", "text": " It is valid."}
+                ]
+            }]
+        });
+
+        let result = transform_request(&input).unwrap();
+
+        let parts = result["contents"][0]["parts"].as_array().unwrap();
+        assert_eq!(parts[0], json!({"text": "I checked the file."}));
+        assert_eq!(parts[1], json!({"text": " It is valid."}));
+    }
+
+    #[test]
+    fn assistant_null_content_with_tool_calls_does_not_emit_null_text() {
+        let input = json!({
+            "model": "gpt-4o",
+            "messages": [{
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": "{\"city\":\"NYC\"}"}
+                }]
+            }]
+        });
+
+        let result = transform_request(&input).unwrap();
+
+        let parts = result["contents"][0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["functionCall"]["name"], "get_weather");
+        assert!(parts[0].get("text").is_none());
     }
 
     #[test]

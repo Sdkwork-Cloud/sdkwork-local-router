@@ -8,8 +8,11 @@ use serde_json::json;
 
 use crate::auth::RequestContext;
 use crate::router::AppState;
+use crate::upstream_auth::{
+    canonical_upstream_auth_scheme, is_supported_auth_scheme, SUPPORTED_UPSTREAM_AUTH_SCHEMES,
+};
 use sdkwork_lr_core::Account;
-use sdkwork_lr_store::{NewAccount, NewClientApiKey};
+use sdkwork_lr_store::{NewAccount, NewClientApiKey, NewModelRouteMapping};
 
 #[derive(Deserialize)]
 pub struct PaginationParams {
@@ -32,13 +35,15 @@ pub struct PluginDecisionQueryParams {
     pub upstream: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateAccountRequest {
     pub name: String,
     pub provider: String,
     pub base_url: String,
-    #[serde(default, alias = "api_key")]
+    #[serde(default)]
     pub upstream_api_key: String,
+    pub upstream_auth_scheme: Option<String>,
     #[serde(default)]
     pub models: Vec<String>,
     #[serde(default = "default_priority")]
@@ -53,7 +58,7 @@ pub struct CreateAccountRequest {
     #[serde(default)]
     pub default_headers: std::collections::BTreeMap<String, String>,
     #[serde(default)]
-    pub model_aliases: std::collections::BTreeMap<String, String>,
+    pub model_route_mappings: std::collections::BTreeMap<String, String>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
@@ -79,6 +84,7 @@ impl From<&CreateAccountRequest> for NewAccount {
             provider: req.provider.clone(),
             base_url: req.base_url.clone(),
             upstream_api_key: req.upstream_api_key.clone(),
+            upstream_auth_scheme: req.upstream_auth_scheme.clone(),
             models: req.models.clone(),
             priority: req.priority,
             timeout_secs: req.timeout_secs,
@@ -86,19 +92,21 @@ impl From<&CreateAccountRequest> for NewAccount {
             retry_delay_ms: req.retry_delay_ms,
             anthropic_version: req.anthropic_version.clone(),
             default_headers: req.default_headers.clone(),
-            model_aliases: req.model_aliases.clone(),
+            model_route_mappings: effective_create_model_route_mappings(req),
             enabled: req.enabled,
         }
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateAccountRequest {
     pub name: Option<String>,
     pub provider: Option<String>,
     pub base_url: Option<String>,
-    #[serde(alias = "api_key")]
     pub upstream_api_key: Option<String>,
+    #[serde(default)]
+    pub upstream_auth_scheme: PatchField<String>,
     pub models: Option<Vec<String>>,
     pub priority: Option<i32>,
     pub timeout_secs: Option<i64>,
@@ -106,13 +114,61 @@ pub struct UpdateAccountRequest {
     pub retry_delay_ms: Option<i64>,
     pub anthropic_version: Option<String>,
     pub default_headers: Option<std::collections::BTreeMap<String, String>>,
-    pub model_aliases: Option<std::collections::BTreeMap<String, String>>,
+    pub model_route_mappings: Option<std::collections::BTreeMap<String, String>>,
     pub enabled: Option<bool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateModelRouteMappingRequest {
+    pub account_id: i64,
+    pub client_model: String,
+    pub upstream_model: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    pub notes: Option<String>,
+}
+
+fn effective_create_model_route_mappings(
+    req: &CreateAccountRequest,
+) -> std::collections::BTreeMap<String, String> {
+    req.model_route_mappings.clone()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PatchField<T> {
+    #[default]
+    Missing,
+    Null,
+    Value(T),
+}
+
+impl<'de, T> Deserialize<'de> for PatchField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(|value| match value {
+            Some(value) => PatchField::Value(value),
+            None => PatchField::Null,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateClientApiKeyRequest {
     pub name: Option<String>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToggleAccountRequest {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
@@ -144,6 +200,38 @@ fn context_payload(context: &RequestContext) -> serde_json::Value {
 
 fn generated_client_api_key_secret() -> String {
     format!("sk-lr-{}", uuid::Uuid::new_v4().simple())
+}
+
+fn normalize_optional_upstream_auth_scheme(
+    scheme: Option<String>,
+) -> Result<Option<String>, String> {
+    match scheme {
+        Some(scheme) => {
+            let Some(canonical) = canonical_upstream_auth_scheme(&scheme) else {
+                return Err(
+                    "upstream_auth_scheme must be one of: bearer, x-api-key, x-goog-api-key, query-key"
+                        .to_owned(),
+                );
+            };
+            if canonical.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(canonical.to_owned()))
+            }
+        }
+        None => Ok(None),
+    }
+}
+
+fn resolve_upstream_auth_scheme_patch(
+    patch: PatchField<String>,
+    existing: Option<String>,
+) -> Result<Option<String>, String> {
+    match patch {
+        PatchField::Missing => Ok(existing),
+        PatchField::Null => Ok(None),
+        PatchField::Value(value) => normalize_optional_upstream_auth_scheme(Some(value)),
+    }
 }
 
 pub async fn router_status(
@@ -405,6 +493,7 @@ fn plugin_registry_payload(
         "api_groups": crate::api_groups::local_router_api_groups(base_paths),
         "api_surfaces": api_surface_standards_payload(),
         "client_apis": client_api_standards_payload(),
+        "upstream_auth_schemes": upstream_auth_scheme_standards_payload(),
         "routing_strategies": routing_strategy_standards_payload(),
         "pipeline_stages": pipeline_stage_standards_payload(),
         "standard_components": standard_component_standards_payload(),
@@ -420,6 +509,40 @@ fn plugin_registry_payload(
             {"name": "billing_meter", "enabled": false, "available": true},
         ]
     })
+}
+
+fn upstream_auth_scheme_standards_payload() -> Vec<serde_json::Value> {
+    vec![
+        json!({
+            "code": "provider_default",
+            "display_name": "Provider Default",
+            "description": "Omit upstream_auth_scheme and inject credentials using the selected provider default: OpenAI/custom Bearer, Anthropic x-api-key, Google x-goog-api-key.",
+        }),
+        json!({
+            "code": "bearer",
+            "display_name": "Bearer",
+            "header": "Authorization",
+            "description": "Inject Authorization: Bearer <upstream_api_key>. Use for OpenAI-compatible APIs and Anthropic-compatible non-Anthropic upstreams that document bearer auth.",
+        }),
+        json!({
+            "code": "x-api-key",
+            "display_name": "x-api-key",
+            "header": "x-api-key",
+            "description": "Inject x-api-key: <upstream_api_key>. This is the default for Anthropic provider accounts.",
+        }),
+        json!({
+            "code": "x-goog-api-key",
+            "display_name": "x-goog-api-key",
+            "header": "x-goog-api-key",
+            "description": "Inject x-goog-api-key: <upstream_api_key>. This is the default for Google/Gemini provider accounts.",
+        }),
+        json!({
+            "code": "query-key",
+            "display_name": "Query key",
+            "query_parameter": "key",
+            "description": "Append key=<upstream_api_key> to the upstream query string for providers that require query-parameter API key auth.",
+        }),
+    ]
 }
 
 fn routing_strategy_standards_payload() -> Vec<serde_json::Value> {
@@ -841,6 +964,20 @@ pub async fn list_accounts(
 ) -> impl IntoResponse {
     match state.store.list_accounts_for_user(context.user_id).await {
         Ok(accounts) => {
+            let route_mappings = match state
+                .store
+                .list_model_route_mappings_for_user(context.user_id)
+                .await
+            {
+                Ok(route_mappings) => route_mappings,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": e.to_string()})),
+                    )
+                        .into_response()
+                }
+            };
             let masked: Vec<serde_json::Value> = accounts
                 .iter()
                 .map(|a| {
@@ -855,6 +992,25 @@ pub async fn list_accounts(
                     } else {
                         "****".to_owned()
                     };
+                    let mut merged_model_route_mappings: std::collections::BTreeMap<
+                        String,
+                        String,
+                    > = serde_json::from_str(&a.model_route_mappings.clone().unwrap_or_default())
+                        .unwrap_or_default();
+                    let account_route_mapping_rows: Vec<_> = route_mappings
+                        .iter()
+                        .filter(|route_mapping| route_mapping.account_id == a.id)
+                        .cloned()
+                        .collect();
+                    for route_mapping in account_route_mapping_rows
+                        .iter()
+                        .filter(|route_mapping| route_mapping.enabled)
+                    {
+                        merged_model_route_mappings.insert(
+                            route_mapping.client_model.clone(),
+                            route_mapping.upstream_model.clone(),
+                        );
+                    }
                     json!({
                         "id": a.id,
                         "user_id": a.user_id,
@@ -862,6 +1018,7 @@ pub async fn list_accounts(
                         "provider": a.provider,
                         "base_url": a.base_url,
                         "upstream_api_key": masked_key,
+                        "upstream_auth_scheme": a.upstream_auth_scheme,
                         "models": a.models,
                         "priority": a.priority,
                         "timeout_secs": a.timeout_secs,
@@ -869,7 +1026,8 @@ pub async fn list_accounts(
                         "retry_delay_ms": a.retry_delay_ms,
                         "anthropic_version": a.anthropic_version,
                         "default_headers": a.default_headers,
-                        "model_aliases": a.model_aliases,
+                        "model_route_mappings": merged_model_route_mappings,
+                        "model_route_mapping_rows": account_route_mapping_rows,
                         "enabled": a.enabled,
                     })
                 })
@@ -936,6 +1094,20 @@ pub async fn create_account(
         )
             .into_response();
     }
+    let upstream_auth_scheme =
+        match normalize_optional_upstream_auth_scheme(req.upstream_auth_scheme.clone()) {
+            Ok(value) => value,
+            Err(error) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": error,
+                        "supported": SUPPORTED_UPSTREAM_AUTH_SCHEMES,
+                    })),
+                )
+                    .into_response();
+            }
+        };
     if req.max_retries < 0 || req.max_retries > 10 {
         return (
             StatusCode::BAD_REQUEST,
@@ -946,6 +1118,7 @@ pub async fn create_account(
 
     let mut new_account: NewAccount = (&req).into();
     new_account.user_id = context.user_id;
+    new_account.upstream_auth_scheme = upstream_auth_scheme;
     match state.store.insert_account(&new_account).await {
         Ok(id) => {
             reload_pool_from_store_for_user_id(&state, context.user_id)
@@ -1036,6 +1209,18 @@ pub async fn update_account(
                 .into_response();
         }
     }
+    if let PatchField::Value(ref upstream_auth_scheme) = req.upstream_auth_scheme {
+        if !is_supported_auth_scheme(Some(upstream_auth_scheme)) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "upstream_auth_scheme must be one of: bearer, x-api-key, x-goog-api-key, query-key",
+                    "supported": SUPPORTED_UPSTREAM_AUTH_SCHEMES,
+                })),
+            )
+                .into_response();
+        }
+    }
 
     let existing = match state.store.get_account_for_user(context.user_id, id).await {
         Ok(account) => account,
@@ -1054,7 +1239,25 @@ pub async fn update_account(
                 .into_response()
         }
     };
+    let upstream_auth_scheme = match resolve_upstream_auth_scheme_patch(
+        req.upstream_auth_scheme,
+        existing.upstream_auth_scheme,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": error,
+                    "supported": SUPPORTED_UPSTREAM_AUTH_SCHEMES,
+                })),
+            )
+                .into_response();
+        }
+    };
 
+    let route_mapping_patch = req.model_route_mappings;
+    let sync_model_route_mappings = route_mapping_patch.is_some();
     let updated = NewAccount {
         user_id: context.user_id,
         name: req.name.unwrap_or(existing.name),
@@ -1064,6 +1267,7 @@ pub async fn update_account(
             .upstream_api_key
             .filter(|k| !k.is_empty())
             .unwrap_or(existing.upstream_api_key),
+        upstream_auth_scheme,
         models: req
             .models
             .unwrap_or_else(|| serde_json::from_str(&existing.models).unwrap_or_default()),
@@ -1075,17 +1279,26 @@ pub async fn update_account(
         default_headers: req.default_headers.unwrap_or_else(|| {
             serde_json::from_str(&existing.default_headers.unwrap_or_default()).unwrap_or_default()
         }),
-        model_aliases: req.model_aliases.unwrap_or_else(|| {
-            serde_json::from_str(&existing.model_aliases.unwrap_or_default()).unwrap_or_default()
+        model_route_mappings: route_mapping_patch.unwrap_or_else(|| {
+            serde_json::from_str(&existing.model_route_mappings.unwrap_or_default())
+                .unwrap_or_default()
         }),
         enabled: req.enabled.unwrap_or(existing.enabled),
     };
 
-    match state
-        .store
-        .update_account_for_user(context.user_id, id, &updated)
-        .await
-    {
+    let update_result = if sync_model_route_mappings {
+        state
+            .store
+            .update_account_for_user(context.user_id, id, &updated)
+            .await
+    } else {
+        state
+            .store
+            .update_account_for_user_without_route_mapping_sync(context.user_id, id, &updated)
+            .await
+    };
+
+    match update_result {
         Ok(()) => {
             reload_pool_from_store_for_user_id(&state, context.user_id)
                 .await
@@ -1126,16 +1339,146 @@ pub async fn delete_account(
     }
 }
 
+pub async fn list_model_route_mappings(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+) -> impl IntoResponse {
+    match state
+        .store
+        .list_model_route_mappings_for_user(context.user_id)
+        .await
+    {
+        Ok(route_mappings) => Json(json!({
+            "context": context_payload(&context),
+            "user_id": context.user_id,
+            "model_route_mappings": route_mappings,
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn upsert_model_route_mapping(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Json(req): Json<CreateModelRouteMappingRequest>,
+) -> impl IntoResponse {
+    if req.account_id <= 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "account_id must be positive"})),
+        )
+            .into_response();
+    }
+    if req.client_model.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "client_model is required"})),
+        )
+            .into_response();
+    }
+    if req.upstream_model.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "upstream_model is required"})),
+        )
+            .into_response();
+    }
+
+    let account = match state
+        .store
+        .get_account_for_user(context.user_id, req.account_id)
+        .await
+    {
+        Ok(account) => account,
+        Err(sdkwork_lr_store::StoreError::NotFound(_)) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "account not found"})),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    };
+
+    let route_mapping = NewModelRouteMapping {
+        user_id: context.user_id,
+        account_id: account.id,
+        account_name: account.name,
+        client_model: req.client_model.trim().to_owned(),
+        upstream_model: req.upstream_model.trim().to_owned(),
+        enabled: req.enabled,
+        notes: req.notes,
+    };
+
+    match state.store.upsert_model_route_mapping(&route_mapping).await {
+        Ok(id) => {
+            reload_pool_from_store_for_user_id(&state, context.user_id)
+                .await
+                .ok();
+            Json(json!({
+                "context": context_payload(&context),
+                "user_id": context.user_id,
+                "id": id,
+                "status": "upserted",
+            }))
+            .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn delete_model_route_mapping(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Extension(context): Extension<RequestContext>,
+) -> impl IntoResponse {
+    match state
+        .store
+        .delete_model_route_mapping_for_user(context.user_id, id)
+        .await
+    {
+        Ok(()) => {
+            reload_pool_from_store_for_user_id(&state, context.user_id)
+                .await
+                .ok();
+            Json(json!({
+                "context": context_payload(&context),
+                "user_id": context.user_id,
+                "id": id,
+                "status": "deleted",
+            }))
+            .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
 pub async fn toggle_account(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Extension(context): Extension<RequestContext>,
-    Json(body): Json<serde_json::Value>,
+    Json(req): Json<ToggleAccountRequest>,
 ) -> impl IntoResponse {
-    let enabled = body
-        .get("enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let enabled = req.enabled;
     match state
         .store
         .toggle_account_for_user(context.user_id, id, enabled)
@@ -1301,7 +1644,8 @@ pub async fn force_close_account(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SetStrategyRequest {
     pub strategy: String,
 }
@@ -1397,6 +1741,11 @@ pub async fn set_routing_strategy(
 async fn reload_pool_from_store_for_user_id(state: &AppState, user_id: i64) -> Result<(), String> {
     match state.store.list_accounts_for_user(user_id).await {
         Ok(rows) => {
+            let enabled_route_mappings = state
+                .store
+                .list_enabled_model_route_mappings_for_user(user_id)
+                .await
+                .map_err(|error| error.to_string())?;
             let accounts: Vec<Account> = rows
                 .into_iter()
                 .filter_map(|r| {
@@ -1410,15 +1759,25 @@ async fn reload_pool_from_store_for_user_id(state: &AppState, user_id: i64) -> R
                     let default_headers: std::collections::BTreeMap<String, String> =
                         serde_json::from_str(&r.default_headers.unwrap_or_default())
                             .unwrap_or_default();
-                    let model_aliases: std::collections::BTreeMap<String, String> =
-                        serde_json::from_str(&r.model_aliases.unwrap_or_default())
+                    let mut model_route_mappings: std::collections::BTreeMap<String, String> =
+                        serde_json::from_str(&r.model_route_mappings.unwrap_or_default())
                             .unwrap_or_default();
+                    for route_mapping in enabled_route_mappings
+                        .iter()
+                        .filter(|route_mapping| route_mapping.account_id == r.id)
+                    {
+                        model_route_mappings.insert(
+                            route_mapping.client_model.clone(),
+                            route_mapping.upstream_model.clone(),
+                        );
+                    }
 
                     Some(Account {
                         name: r.name,
                         provider,
                         base_url: r.base_url,
                         upstream_api_key: r.upstream_api_key,
+                        upstream_auth_scheme: r.upstream_auth_scheme,
                         models,
                         priority: r.priority as u32,
                         timeout: std::time::Duration::from_secs(r.timeout_secs as u64),
@@ -1427,7 +1786,7 @@ async fn reload_pool_from_store_for_user_id(state: &AppState, user_id: i64) -> R
                         anthropic_version: r.anthropic_version,
                         default_headers,
                         enabled: r.enabled,
-                        model_aliases,
+                        model_route_mappings,
                     })
                 })
                 .collect();
@@ -1655,15 +2014,15 @@ mod tests {
         assert!(api_groups
             .iter()
             .any(|item| item["code"] == "local-router-app-api"
-                && item["canonical_prefix"] == "/app/v3/api/router"));
+                && item["canonical_prefix"] == "/app/v3/api/local_router"));
         assert!(api_groups
             .iter()
             .any(|item| item["code"] == "local-router-backend-api"
-                && item["canonical_prefix"] == "/backend/v3/api/router"));
+                && item["canonical_prefix"] == "/backend/v3/api/local_router"));
     }
 
     #[test]
-    fn routing_strategy_request_accepts_auto_and_aliases() {
+    fn routing_strategy_request_accepts_auto_and_route_mappings() {
         assert!(matches!(
             parse_routing_strategy_update("auto"),
             Ok(RoutingStrategyUpdate::Auto)
@@ -1674,7 +2033,125 @@ mod tests {
                 sdkwork_lr_core::RoutingStrategy::RoundRobin
             ))
         ));
-        assert!(parse_routing_strategy_update("legacy").is_err());
+        assert!(parse_routing_strategy_update("invalid").is_err());
+    }
+
+    #[test]
+    fn update_account_auth_scheme_patch_distinguishes_missing_null_and_value() {
+        let missing: UpdateAccountRequest = serde_json::from_value(json!({})).unwrap();
+        let clear: UpdateAccountRequest =
+            serde_json::from_value(json!({"upstream_auth_scheme": null})).unwrap();
+        let value: UpdateAccountRequest =
+            serde_json::from_value(json!({"upstream_auth_scheme": "authorization_bearer"}))
+                .unwrap();
+
+        assert!(matches!(missing.upstream_auth_scheme, PatchField::Missing));
+        assert!(matches!(clear.upstream_auth_scheme, PatchField::Null));
+        assert!(matches!(
+            value.upstream_auth_scheme,
+            PatchField::Value(ref scheme) if scheme == "authorization_bearer"
+        ));
+        assert_eq!(
+            resolve_upstream_auth_scheme_patch(PatchField::Missing, Some("x-api-key".to_owned()))
+                .unwrap(),
+            Some("x-api-key".to_owned())
+        );
+        assert_eq!(
+            resolve_upstream_auth_scheme_patch(PatchField::Null, Some("bearer".to_owned()))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve_upstream_auth_scheme_patch(
+                PatchField::Value("authorization_bearer".to_owned()),
+                None,
+            )
+            .unwrap(),
+            Some("bearer".to_owned())
+        );
+    }
+
+    #[test]
+    fn account_requests_reject_ambiguous_api_key_field() {
+        let create_error = serde_json::from_value::<CreateAccountRequest>(json!({
+            "name": "ambiguous-key",
+            "provider": "openai",
+            "base_url": "https://api.example/v1",
+            "api_key": "sk-upstream"
+        }))
+        .unwrap_err();
+        assert!(create_error.to_string().contains("unknown field `api_key`"));
+
+        let update_error = serde_json::from_value::<UpdateAccountRequest>(json!({
+            "api_key": "sk-upstream"
+        }))
+        .unwrap_err();
+        assert!(update_error.to_string().contains("unknown field `api_key`"));
+    }
+
+    #[test]
+    fn account_requests_accept_only_explicit_upstream_api_key() {
+        let create: CreateAccountRequest = serde_json::from_value(json!({
+            "name": "explicit-key",
+            "provider": "openai",
+            "base_url": "https://api.example/v1",
+            "upstream_api_key": "sk-upstream"
+        }))
+        .unwrap();
+        assert_eq!(create.upstream_api_key, "sk-upstream");
+
+        let update: UpdateAccountRequest = serde_json::from_value(json!({
+            "upstream_api_key": "sk-upstream-2"
+        }))
+        .unwrap();
+        assert_eq!(update.upstream_api_key.as_deref(), Some("sk-upstream-2"));
+    }
+
+    #[test]
+    fn management_requests_reject_unknown_fields() {
+        let client_key_error = serde_json::from_value::<CreateClientApiKeyRequest>(json!({
+            "name": "codex",
+            "api_key": "sk-should-not-be-accepted"
+        }))
+        .unwrap_err();
+        assert!(client_key_error
+            .to_string()
+            .contains("unknown field `api_key`"));
+
+        let mapping_error = serde_json::from_value::<CreateModelRouteMappingRequest>(json!({
+            "account_id": 1,
+            "client_model": "gpt-5.5",
+            "upstream_model": "gemini-2.5-pro",
+            "unexpected_mapping_name": "invalid"
+        }))
+        .unwrap_err();
+        assert!(mapping_error
+            .to_string()
+            .contains("unknown field `unexpected_mapping_name`"));
+
+        let toggle_error = serde_json::from_value::<ToggleAccountRequest>(json!({
+            "enabled": true,
+            "account_enabled": true
+        }))
+        .unwrap_err();
+        assert!(toggle_error
+            .to_string()
+            .contains("unknown field `account_enabled`"));
+
+        let strategy_error = serde_json::from_value::<SetStrategyRequest>(json!({
+            "strategy": "round_robin",
+            "routing_strategy": "random"
+        }))
+        .unwrap_err();
+        assert!(strategy_error
+            .to_string()
+            .contains("unknown field `routing_strategy`"));
+    }
+
+    #[test]
+    fn toggle_account_request_defaults_to_enabled() {
+        let req: ToggleAccountRequest = serde_json::from_value(json!({})).unwrap();
+        assert!(req.enabled);
     }
 
     #[test]

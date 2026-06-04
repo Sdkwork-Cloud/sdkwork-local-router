@@ -11,7 +11,7 @@ database_url = "sqlite:./data/local-router.db?mode=rwc"
 
 # Local authentication is not configured in TOML. Proxy/OpenAI/Claude/Gemini-compatible
 # requests authenticate with a database-backed client API key created through
-# /backend/v3/api/router/client_api_keys.
+# /backend/v3/api/local_router/client_api_keys.
 # The client API key row carries user_id; an empty user context defaults to 0.
 # App/backend APIs resolve user_id from SDKWork auth/access tokens or JWT context.
 
@@ -47,11 +47,11 @@ allowed_origins = ["http://localhost:*"]
 strategy = "round_robin"
 
 [plugins]
-# enabled=false keeps the original client API surface and only applies model aliases.
+# enabled=false keeps the original client API surface and only applies model route mappings.
 enabled = true
 # auto: use sdkwork-models vendor/model metadata to choose the target API surface.
 # strict: same as auto, but request transform failures return 400 instead of forwarding the original body.
-# passthrough: disable body/path API conversion while preserving model aliases.
+# passthrough: disable body/path API conversion while preserving model route mappings.
 # force_transform: ignore model catalog target surface and convert to the selected upstream provider surface.
 policy = "auto"
 # Expose x-sdkwork-plugin-* decision headers on proxied responses for IDE/tool diagnostics.
@@ -80,13 +80,20 @@ base_url = "https://api.openai.com/v1"
 # Upstream provider credential only. It must never be used as a local-router
 # client identity credential.
 upstream_api_key = ""
+# Optional upstream credential injection override. Omit for provider defaults:
+# openai/custom -> bearer, anthropic -> x-api-key, google -> x-goog-api-key.
+# Use "bearer" for Anthropic-compatible non-Anthropic upstreams such as
+# DeepSeek/Z.AI Claude Code-compatible endpoints when their docs require
+# Authorization: Bearer.
+# Supported: "bearer", "x-api-key", "x-goog-api-key", "query-key".
+# upstream_auth_scheme = "bearer"
 models = ["gpt-4o*", "gpt-4*", "o3*", "o4*"]
 priority = 10
 timeout_secs = 120
 max_retries = 2
 retry_delay_ms = 500
 
-[upstreams.model_aliases]
+[upstreams.model_route_mappings]
 "gpt-4o" = "gpt-4o-2024-08-06"
 
 [[upstreams]]
@@ -99,7 +106,7 @@ priority = 10
 timeout_secs = 120
 anthropic_version = "2023-06-01"
 
-[upstreams.model_aliases]
+[upstreams.model_route_mappings]
 "claude-3.5-sonnet" = "claude-3-5-sonnet-20241022"
 
 [[upstreams]]
@@ -111,6 +118,11 @@ models = ["gemini-*"]
 priority = 10
 timeout_secs = 120
 
+[upstreams.model_route_mappings]
+# Example: let Codex/OpenAI-compatible clients keep using a local GPT-style
+# model name while the router sends requests to the real Gemini model.
+"gpt-5.5" = "gemini-2.5-pro"
+
 [[upstreams]]
 name = "openai-compatible-proxy"
 provider = "openai"
@@ -119,3 +131,14 @@ upstream_api_key = ""
 models = ["*"]
 priority = 100
 timeout_secs = 180
+
+[[upstreams]]
+name = "deepseek-claude-code-compatible"
+provider = "anthropic"
+base_url = "https://api.deepseek.com/anthropic"
+upstream_api_key = ""
+upstream_auth_scheme = "bearer"
+models = ["deepseek-*"]
+priority = 50
+timeout_secs = 180
+anthropic_version = "2023-06-01"

@@ -131,7 +131,11 @@ fn gemini_finish_reason_to_openai(reason: &str) -> &'static str {
         | "BLOCKLIST"
         | "PROHIBITED_CONTENT"
         | "SPII"
-        | "MALFORMED_FUNCTION_CALL" => "content_filter",
+        | "MALFORMED_FUNCTION_CALL"
+        | "UNEXPECTED_TOOL_CALL"
+        | "TOO_MANY_TOOL_CALLS"
+        | "MISSING_THOUGHT_SIGNATURE"
+        | "MALFORMED_RESPONSE" => "content_filter",
         _ => "stop",
     }
 }
@@ -259,6 +263,34 @@ mod tests {
         });
         let result = transform_response(&input, "gemini-pro").unwrap();
         assert_eq!(result["choices"][0]["finish_reason"], "length");
+    }
+
+    #[test]
+    fn unexpected_tool_call_finish_reason_maps_to_content_filter() {
+        let input = json!({
+            "candidates": [{
+                "content": {"parts": [], "role": "model"},
+                "finishReason": "UNEXPECTED_TOOL_CALL",
+                "index": 0
+            }]
+        });
+
+        let result = transform_response(&input, "gemini-pro").unwrap();
+        assert_eq!(result["choices"][0]["finish_reason"], "content_filter");
+    }
+
+    #[test]
+    fn malformed_response_finish_reason_maps_to_content_filter() {
+        let input = json!({
+            "candidates": [{
+                "content": {"parts": [], "role": "model"},
+                "finishReason": "MALFORMED_RESPONSE",
+                "index": 0
+            }]
+        });
+
+        let result = transform_response(&input, "gemini-pro").unwrap();
+        assert_eq!(result["choices"][0]["finish_reason"], "content_filter");
     }
 
     #[test]

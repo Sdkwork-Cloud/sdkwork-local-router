@@ -32,6 +32,7 @@ mod plugin_tests {
             target_protocol: sdkwork_lr_core::Protocol::Openai,
             client_path: "/v1/responses".to_owned(),
             client_base_path: "/v1".to_owned(),
+            upstream_model: None,
             model: Some("gpt-5.5".to_owned()),
             is_streaming: false,
         }
@@ -42,10 +43,33 @@ mod plugin_tests {
         let registry = plugins::built_in_plugin_registry();
 
         let response_to_claude = registry
-            .get("OPENAI_COMPATIBLE_RESPONSE_TO_CLADUE_MESSAGE_API")
+            .get("OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGE_API")
             .expect("response to Claude plugin");
         assert_eq!(
             response_to_claude.manifest().id,
+            "OPENAI_RESPONSES_TO_ANTHROPIC_MESSAGES_API"
+        );
+
+        let misspelled_claude_plugin_id = "OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGES_WRONG_API";
+        assert_eq!(
+            sdkwork_lr_plugin::normalize_plugin_id(&misspelled_claude_plugin_id),
+            misspelled_claude_plugin_id
+        );
+        assert!(registry.get(&misspelled_claude_plugin_id).is_none());
+        assert!(
+            registry
+                .manifests()
+                .iter()
+                .flat_map(|manifest| manifest.aliases.iter())
+                .all(|alias| alias != &misspelled_claude_plugin_id),
+            "misspelled plugin id must not be advertised as a standard alias"
+        );
+
+        let anthropic_alias = registry
+            .get("OPENAI_COMPATIBLE_RESPONSE_TO_ANTHROPIC_MESSAGES_API")
+            .expect("response to Anthropic plugin");
+        assert_eq!(
+            anthropic_alias.manifest().id,
             "OPENAI_RESPONSES_TO_ANTHROPIC_MESSAGES_API"
         );
 
@@ -114,6 +138,66 @@ mod plugin_tests {
                 .capabilities
                 .stream
         );
+        assert!(
+            registry
+                .resolve(ApiSurface::OpenAiResponses, ApiSurface::AnthropicMessages)
+                .expect("OpenAI Responses to Anthropic plugin")
+                .manifest()
+                .capabilities
+                .stream
+        );
+        assert!(
+            registry
+                .resolve(
+                    ApiSurface::OpenAiResponses,
+                    ApiSurface::GeminiGenerateContent
+                )
+                .expect("OpenAI Responses to Gemini plugin")
+                .manifest()
+                .capabilities
+                .stream
+        );
+        assert!(
+            registry
+                .resolve(ApiSurface::AnthropicMessages, ApiSurface::OpenAiResponses)
+                .expect("Anthropic to OpenAI Responses plugin")
+                .manifest()
+                .capabilities
+                .stream
+        );
+        assert!(
+            registry
+                .resolve(
+                    ApiSurface::GeminiGenerateContent,
+                    ApiSurface::OpenAiResponses
+                )
+                .expect("Gemini to OpenAI Responses plugin")
+                .manifest()
+                .capabilities
+                .stream
+        );
+        assert!(
+            registry
+                .resolve(
+                    ApiSurface::AnthropicMessages,
+                    ApiSurface::GeminiGenerateContent
+                )
+                .expect("Anthropic to Gemini plugin")
+                .manifest()
+                .capabilities
+                .stream
+        );
+        assert!(
+            registry
+                .resolve(
+                    ApiSurface::GeminiGenerateContent,
+                    ApiSurface::AnthropicMessages
+                )
+                .expect("Gemini to Anthropic plugin")
+                .manifest()
+                .capabilities
+                .stream
+        );
 
         for (source, target) in [
             (
@@ -124,29 +208,11 @@ mod plugin_tests {
                 ApiSurface::OpenAiResponses,
                 ApiSurface::OpenAiChatCompletions,
             ),
-            (ApiSurface::OpenAiResponses, ApiSurface::AnthropicMessages),
-            (
-                ApiSurface::OpenAiResponses,
-                ApiSurface::GeminiGenerateContent,
-            ),
-            (ApiSurface::AnthropicMessages, ApiSurface::OpenAiResponses),
-            (
-                ApiSurface::GeminiGenerateContent,
-                ApiSurface::OpenAiResponses,
-            ),
-            (
-                ApiSurface::AnthropicMessages,
-                ApiSurface::GeminiGenerateContent,
-            ),
-            (
-                ApiSurface::GeminiGenerateContent,
-                ApiSurface::AnthropicMessages,
-            ),
         ] {
             let plugin = registry.resolve(source, target).expect("standard plugin");
             assert!(
-                !plugin.manifest().capabilities.stream,
-                "{} must not advertise stream support without event-level transform",
+                plugin.manifest().capabilities.stream,
+                "{} must advertise stream support because event-level transform exists",
                 plugin.manifest().id
             );
         }
@@ -321,7 +387,7 @@ mod plugin_tests {
             "prompt_cache_retention": "24h",
             "stream_options": {"include_usage": true},
             "top_logprobs": 2,
-            "user": "legacy-user"
+            "user": "request-user"
         });
 
         let output = plugin
@@ -342,7 +408,7 @@ mod plugin_tests {
         assert_eq!(output["prompt_cache_retention"], "24h");
         assert_eq!(output["stream_options"], json!({"include_usage": true}));
         assert_eq!(output["top_logprobs"], 2);
-        assert_eq!(output["user"], "legacy-user");
+        assert_eq!(output["user"], "request-user");
     }
 
     #[test]
@@ -490,7 +556,7 @@ mod plugin_tests {
             "prompt_cache_retention": "24h",
             "stream_options": {"include_usage": true},
             "top_logprobs": 2,
-            "user": "legacy-user"
+            "user": "request-user"
         });
 
         let output = plugin
@@ -511,7 +577,7 @@ mod plugin_tests {
         assert_eq!(output["prompt_cache_retention"], "24h");
         assert_eq!(output["stream_options"], json!({"include_usage": true}));
         assert_eq!(output["top_logprobs"], 2);
-        assert_eq!(output["user"], "legacy-user");
+        assert_eq!(output["user"], "request-user");
     }
 
     #[test]
@@ -785,6 +851,89 @@ mod plugin_tests {
     }
 
     #[test]
+    fn responses_to_chat_plugin_ignores_reasoning_items_without_leaking_internal_text() {
+        let registry = plugins::built_in_plugin_registry();
+        let plugin = registry
+            .resolve(
+                ApiSurface::OpenAiResponses,
+                ApiSurface::OpenAiChatCompletions,
+            )
+            .expect("Responses to Chat plugin");
+        let input = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"role": "user", "content": [{"type": "input_text", "text": "Hi"}]},
+                {"type": "reasoning", "summary": [{"type": "summary_text", "text": "private chain"}]}
+            ]
+        });
+
+        let output = plugin
+            .transform_request(
+                &input,
+                &context(
+                    ApiSurface::OpenAiResponses,
+                    ApiSurface::OpenAiChatCompletions,
+                ),
+            )
+            .unwrap();
+        let messages = output["messages"].as_array().expect("Chat messages");
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "Hi");
+    }
+
+    #[test]
+    fn responses_to_chat_plugin_maps_shell_call_input_items_to_tool_calls_for_codex() {
+        let registry = plugins::built_in_plugin_registry();
+        let plugin = registry
+            .resolve(
+                ApiSurface::OpenAiResponses,
+                ApiSurface::OpenAiChatCompletions,
+            )
+            .expect("Responses to Chat plugin");
+        let input = json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "local_shell_call",
+                "call_id": "call_local_shell_123",
+                "action": {
+                    "type": "exec",
+                    "command": ["pwd"],
+                    "env": {},
+                    "working_directory": "/repo",
+                    "timeout_ms": 1000
+                },
+                "status": "completed"
+            }]
+        });
+
+        let output = plugin
+            .transform_request(
+                &input,
+                &context(
+                    ApiSurface::OpenAiResponses,
+                    ApiSurface::OpenAiChatCompletions,
+                ),
+            )
+            .unwrap();
+        let assistant = output["messages"]
+            .as_array()
+            .expect("Chat messages")
+            .iter()
+            .find(|message| message["role"] == "assistant")
+            .expect("assistant shell tool call");
+        let tool_call = &assistant["tool_calls"][0];
+
+        assert_eq!(tool_call["id"], "call_local_shell_123");
+        assert_eq!(tool_call["function"]["name"], "local_shell");
+        assert_eq!(
+            tool_call["function"]["arguments"],
+            "{\"command\":[\"pwd\"],\"env\":{},\"timeout_ms\":1000,\"type\":\"exec\",\"working_directory\":\"/repo\"}"
+        );
+    }
+
+    #[test]
     fn chat_response_to_responses_plugin_preserves_tool_calls() {
         let registry = plugins::built_in_plugin_registry();
         let plugin = registry
@@ -956,6 +1105,633 @@ mod plugin_tests {
     }
 
     #[test]
+    fn codex_responses_request_to_claude_maps_local_shell_tool_choice_and_results() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiResponses,
+            target: ApiSurface::AnthropicMessages,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Anthropic,
+            client_path: "/v1/responses".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("claude-sonnet-4-20250514".to_owned()),
+            is_streaming: true,
+        };
+
+        let output = transform_request_body_with_context(
+            &json!({
+                "model": "claude-sonnet-4-20250514",
+                "instructions": "You are Codex.",
+                "stream": true,
+                "max_output_tokens": 512,
+                "tool_choice": {"type": "local_shell"},
+                "tools": [{"type": "local_shell", "environment": {"type": "local"}}],
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "inspect the repo"}]
+                    },
+                    {
+                        "type": "local_shell_call",
+                        "call_id": "call_local_shell_123",
+                        "action": {
+                            "type": "exec",
+                            "command": ["pwd"],
+                            "working_directory": "/repo",
+                            "timeout_ms": 1000
+                        }
+                    },
+                    {
+                        "type": "local_shell_call_output",
+                        "call_id": "call_local_shell_123",
+                        "output": "/repo\n"
+                    }
+                ]
+            }),
+            &context,
+        )
+        .expect("OpenAI Responses to Anthropic Messages");
+
+        assert_eq!(output["system"], "You are Codex.");
+        assert_eq!(output["stream"], true);
+        assert_eq!(output["max_tokens"], 512);
+        assert_eq!(
+            output["tool_choice"],
+            json!({"type": "tool", "name": "local_shell"})
+        );
+        assert_eq!(output["tools"][0]["name"], "local_shell");
+        assert_eq!(output["tools"][0]["input_schema"]["required"][0], "command");
+
+        let messages = output["messages"].as_array().expect("Claude messages");
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"][0]["type"], "text");
+        assert_eq!(messages[0]["content"][0]["text"], "inspect the repo");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"][0]["type"], "tool_use");
+        assert_eq!(messages[1]["content"][0]["id"], "call_local_shell_123");
+        assert_eq!(messages[1]["content"][0]["name"], "local_shell");
+        assert_eq!(
+            messages[1]["content"][0]["input"]["command"],
+            json!(["pwd"])
+        );
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"][0]["type"], "tool_result");
+        assert_eq!(
+            messages[2]["content"][0]["tool_use_id"],
+            "call_local_shell_123"
+        );
+        assert_eq!(messages[2]["content"][0]["content"], "/repo\n");
+    }
+
+    #[test]
+    fn claude_local_shell_tool_use_response_maps_back_to_codex_local_shell_call() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiResponses,
+            target: ApiSurface::AnthropicMessages,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Anthropic,
+            client_path: "/v1/responses".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("claude-sonnet-4-20250514".to_owned()),
+            is_streaming: false,
+        };
+
+        let output = transform_response_body_with_context(
+            &json!({
+                "id": "msg_local_shell",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-4-20250514",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "call_local_shell_123",
+                    "name": "local_shell",
+                    "input": {
+                        "command": ["pwd"],
+                        "working_directory": "/repo",
+                        "timeout_ms": 1000
+                    }
+                }],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 18, "output_tokens": 3}
+            }),
+            &context,
+        )
+        .expect("Anthropic Messages to OpenAI Responses");
+
+        assert_eq!(output["object"], "response");
+        assert_eq!(output["status"], "completed");
+        assert_eq!(output["usage"]["input_tokens"], 18);
+        assert_eq!(output["usage"]["output_tokens"], 3);
+        let local_shell_call = output["output"]
+            .as_array()
+            .expect("Responses output")
+            .iter()
+            .find(|item| item["type"] == "local_shell_call")
+            .expect("local_shell_call output item");
+        assert_eq!(local_shell_call["call_id"], "call_local_shell_123");
+        assert_eq!(local_shell_call["action"]["command"], json!(["pwd"]));
+        assert_eq!(local_shell_call["action"]["working_directory"], "/repo");
+        assert_eq!(local_shell_call["action"]["timeout_ms"], 1000);
+    }
+
+    #[test]
+    fn codex_responses_request_to_gemini_maps_local_shell_tool_choice_and_results() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiResponses,
+            target: ApiSurface::GeminiGenerateContent,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Google,
+            client_path: "/v1/responses".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("gemini-2.5-pro".to_owned()),
+            is_streaming: true,
+        };
+
+        let output = transform_request_body_with_context(
+            &json!({
+                "model": "gemini-2.5-pro",
+                "instructions": "You are Codex.",
+                "stream": true,
+                "max_output_tokens": 512,
+                "tool_choice": {"type": "local_shell"},
+                "tools": [{"type": "local_shell", "environment": {"type": "local"}}],
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "inspect the repo"}]
+                    },
+                    {
+                        "type": "local_shell_call",
+                        "call_id": "call_local_shell_123",
+                        "action": {
+                            "type": "exec",
+                            "command": ["pwd"],
+                            "working_directory": "/repo",
+                            "timeout_ms": 1000
+                        }
+                    },
+                    {
+                        "type": "local_shell_call_output",
+                        "call_id": "call_local_shell_123",
+                        "output": "/repo\n"
+                    }
+                ]
+            }),
+            &context,
+        )
+        .expect("OpenAI Responses to Gemini GenerateContent");
+
+        assert_eq!(
+            output["systemInstruction"]["parts"][0]["text"],
+            "You are Codex."
+        );
+        assert_eq!(output["generationConfig"]["maxOutputTokens"], 512);
+        assert_eq!(
+            output["toolConfig"],
+            json!({
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["local_shell"]
+                }
+            })
+        );
+        assert_eq!(
+            output["tools"][0]["functionDeclarations"][0]["name"],
+            "local_shell"
+        );
+        assert_eq!(
+            output["tools"][0]["functionDeclarations"][0]["parameters"]["required"][0],
+            "command"
+        );
+
+        let contents = output["contents"].as_array().expect("Gemini contents");
+        assert_eq!(contents[0]["role"], "user");
+        assert_eq!(contents[0]["parts"][0]["text"], "inspect the repo");
+        assert_eq!(contents[1]["role"], "model");
+        assert_eq!(
+            contents[1]["parts"][0]["functionCall"]["name"],
+            "local_shell"
+        );
+        assert_eq!(
+            contents[1]["parts"][0]["functionCall"]["args"]["command"],
+            json!(["pwd"])
+        );
+        assert_eq!(contents[2]["role"], "user");
+        assert_eq!(
+            contents[2]["parts"][0]["functionResponse"]["name"],
+            "local_shell"
+        );
+        assert_eq!(
+            contents[2]["parts"][0]["functionResponse"]["response"]["result"],
+            "/repo\n"
+        );
+    }
+
+    #[test]
+    fn gemini_local_shell_function_call_response_maps_back_to_codex_local_shell_call() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiResponses,
+            target: ApiSurface::GeminiGenerateContent,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Google,
+            client_path: "/v1/responses".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("gemini-2.5-pro".to_owned()),
+            is_streaming: false,
+        };
+
+        let output = transform_response_body_with_context(
+            &json!({
+                "candidates": [{
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [{
+                            "functionCall": {
+                                "name": "local_shell",
+                                "args": {
+                                    "command": ["pwd"],
+                                    "working_directory": "/repo",
+                                    "timeout_ms": 1000
+                                }
+                            }
+                        }]
+                    },
+                    "finishReason": "STOP"
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 18,
+                    "candidatesTokenCount": 3,
+                    "totalTokenCount": 21
+                }
+            }),
+            &context,
+        )
+        .expect("Gemini GenerateContent to OpenAI Responses");
+
+        assert_eq!(output["object"], "response");
+        assert_eq!(output["status"], "completed");
+        assert_eq!(output["usage"]["input_tokens"], 18);
+        assert_eq!(output["usage"]["output_tokens"], 3);
+        let local_shell_call = output["output"]
+            .as_array()
+            .expect("Responses output")
+            .iter()
+            .find(|item| item["type"] == "local_shell_call")
+            .expect("local_shell_call output item");
+        assert_eq!(local_shell_call["action"]["command"], json!(["pwd"]));
+        assert_eq!(local_shell_call["action"]["working_directory"], "/repo");
+        assert_eq!(local_shell_call["action"]["timeout_ms"], 1000);
+    }
+
+    #[test]
+    fn chat_completions_request_to_claude_maps_tools_tool_choice_and_results() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiChatCompletions,
+            target: ApiSurface::AnthropicMessages,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Anthropic,
+            client_path: "/v1/chat/completions".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("claude-sonnet-4-20250514".to_owned()),
+            is_streaming: true,
+        };
+
+        let output = transform_request_body_with_context(
+            &json!({
+                "model": "claude-sonnet-4-20250514",
+                "stream": true,
+                "messages": [
+                    {"role": "system", "content": "You are helpful."},
+                    {"role": "user", "content": "Get weather"},
+                    {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_weather_123",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": "{\"city\":\"NYC\"}"}
+                        }]
+                    },
+                    {"role": "tool", "tool_call_id": "call_weather_123", "content": "{\"temp\":72}"}
+                ],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": ["city"]
+                        }
+                    }
+                }],
+                "tool_choice": {"type": "function", "function": {"name": "get_weather"}}
+            }),
+            &context,
+        )
+        .expect("OpenAI Chat Completions to Anthropic Messages");
+
+        assert_eq!(output["system"], "You are helpful.");
+        assert_eq!(output["stream"], true);
+        assert_eq!(output["tools"][0]["name"], "get_weather");
+        assert_eq!(
+            output["tool_choice"],
+            json!({"type": "tool", "name": "get_weather"})
+        );
+
+        let messages = output["messages"].as_array().expect("Claude messages");
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"][0]["type"], "text");
+        assert_eq!(messages[0]["content"][0]["text"], "Get weather");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"][0]["type"], "tool_use");
+        assert_eq!(messages[1]["content"][0]["id"], "call_weather_123");
+        assert_eq!(messages[1]["content"][0]["name"], "get_weather");
+        assert_eq!(messages[1]["content"][0]["input"]["city"], "NYC");
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"][0]["type"], "tool_result");
+        assert_eq!(messages[2]["content"][0]["tool_use_id"], "call_weather_123");
+        assert_eq!(messages[2]["content"][0]["content"], "{\"temp\":72}");
+    }
+
+    #[test]
+    fn chat_completions_request_to_claude_serializes_structured_tool_result_content() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiChatCompletions,
+            target: ApiSurface::AnthropicMessages,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Anthropic,
+            client_path: "/v1/chat/completions".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("claude-sonnet-4-20250514".to_owned()),
+            is_streaming: false,
+        };
+
+        let output = transform_request_body_with_context(
+            &json!({
+                "model": "claude-sonnet-4-20250514",
+                "messages": [
+                    {"role": "assistant", "content": null, "tool_calls": [{
+                        "id": "call_weather_123",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{\"city\":\"NYC\"}"}
+                    }]},
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_weather_123",
+                        "content": {"temp": 72, "unit": "f"}
+                    }
+                ]
+            }),
+            &context,
+        )
+        .expect("OpenAI Chat Completions to Anthropic Messages");
+
+        let messages = output["messages"].as_array().expect("Claude messages");
+        assert_eq!(
+            messages[1]["content"][0]["content"],
+            "{\"temp\":72,\"unit\":\"f\"}"
+        );
+    }
+
+    #[test]
+    fn claude_tool_use_response_maps_back_to_chat_completions_tool_calls() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiChatCompletions,
+            target: ApiSurface::AnthropicMessages,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Anthropic,
+            client_path: "/v1/chat/completions".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("claude-sonnet-4-20250514".to_owned()),
+            is_streaming: false,
+        };
+
+        let output = transform_response_body_with_context(
+            &json!({
+                "id": "msg_weather",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-4-20250514",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "call_weather_123",
+                    "name": "get_weather",
+                    "input": {"city": "NYC"}
+                }],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 18, "output_tokens": 4}
+            }),
+            &context,
+        )
+        .expect("Anthropic Messages to OpenAI Chat Completions");
+
+        assert_eq!(output["object"], "chat.completion");
+        assert_eq!(output["choices"][0]["finish_reason"], "tool_calls");
+        let tool_call = &output["choices"][0]["message"]["tool_calls"][0];
+        assert_eq!(tool_call["id"], "call_weather_123");
+        assert_eq!(tool_call["type"], "function");
+        assert_eq!(tool_call["function"]["name"], "get_weather");
+        assert_eq!(tool_call["function"]["arguments"], "{\"city\":\"NYC\"}");
+        assert_eq!(output["usage"]["prompt_tokens"], 18);
+        assert_eq!(output["usage"]["completion_tokens"], 4);
+        assert_eq!(output["usage"]["total_tokens"], 22);
+    }
+
+    #[test]
+    fn chat_completions_request_to_gemini_maps_tools_tool_choice_and_results() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiChatCompletions,
+            target: ApiSurface::GeminiGenerateContent,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Google,
+            client_path: "/v1/chat/completions".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("gemini-2.5-pro".to_owned()),
+            is_streaming: true,
+        };
+
+        let output = transform_request_body_with_context(
+            &json!({
+                "model": "gemini-2.5-pro",
+                "stream": true,
+                "messages": [
+                    {"role": "system", "content": "You are helpful."},
+                    {"role": "user", "content": "Get weather"},
+                    {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_weather_123",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": "{\"city\":\"NYC\"}"}
+                        }]
+                    },
+                    {"role": "tool", "tool_call_id": "call_weather_123", "content": "{\"temp\":72}"}
+                ],
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": ["city"]
+                        }
+                    }
+                }],
+                "tool_choice": {"type": "function", "function": {"name": "get_weather"}}
+            }),
+            &context,
+        )
+        .expect("OpenAI Chat Completions to Gemini GenerateContent");
+
+        assert_eq!(
+            output["systemInstruction"]["parts"][0]["text"],
+            "You are helpful."
+        );
+        assert_eq!(
+            output["tools"][0]["functionDeclarations"][0]["name"],
+            "get_weather"
+        );
+        assert_eq!(
+            output["toolConfig"],
+            json!({
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["get_weather"]
+                }
+            })
+        );
+        let contents = output["contents"].as_array().expect("Gemini contents");
+        assert_eq!(contents[0]["role"], "user");
+        assert_eq!(contents[0]["parts"][0]["text"], "Get weather");
+        assert_eq!(contents[1]["role"], "model");
+        assert_eq!(
+            contents[1]["parts"][0]["functionCall"]["name"],
+            "get_weather"
+        );
+        assert_eq!(
+            contents[1]["parts"][0]["functionCall"]["args"]["city"],
+            "NYC"
+        );
+        assert_eq!(contents[2]["role"], "user");
+        assert_eq!(
+            contents[2]["parts"][0]["functionResponse"]["name"],
+            "get_weather"
+        );
+        assert_eq!(
+            contents[2]["parts"][0]["functionResponse"]["response"]["temp"],
+            72
+        );
+    }
+
+    #[test]
+    fn chat_completions_request_to_gemini_preserves_structured_tool_result_content() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiChatCompletions,
+            target: ApiSurface::GeminiGenerateContent,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Google,
+            client_path: "/v1/chat/completions".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("gemini-2.5-pro".to_owned()),
+            is_streaming: false,
+        };
+
+        let output = transform_request_body_with_context(
+            &json!({
+                "model": "gemini-2.5-pro",
+                "messages": [
+                    {"role": "assistant", "content": null, "tool_calls": [{
+                        "id": "call_weather_123",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{\"city\":\"NYC\"}"}
+                    }]},
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_weather_123",
+                        "content": {"temp": 72, "unit": "f"}
+                    }
+                ]
+            }),
+            &context,
+        )
+        .expect("OpenAI Chat Completions to Gemini GenerateContent");
+
+        let contents = output["contents"].as_array().expect("Gemini contents");
+        assert_eq!(
+            contents[1]["parts"][0]["functionResponse"]["response"],
+            json!({"temp": 72, "unit": "f"})
+        );
+    }
+
+    #[test]
+    fn gemini_function_call_response_maps_back_to_chat_completions_tool_calls() {
+        let context = TransformContext {
+            source: ApiSurface::OpenAiChatCompletions,
+            target: ApiSurface::GeminiGenerateContent,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Google,
+            client_path: "/v1/chat/completions".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("gemini-2.5-pro".to_owned()),
+            is_streaming: false,
+        };
+
+        let output = transform_response_body_with_context(
+            &json!({
+                "candidates": [{
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [{
+                            "functionCall": {
+                                "name": "get_weather",
+                                "args": {"city": "NYC"}
+                            }
+                        }]
+                    },
+                    "finishReason": "STOP"
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 18,
+                    "candidatesTokenCount": 4,
+                    "totalTokenCount": 22
+                }
+            }),
+            &context,
+        )
+        .expect("Gemini GenerateContent to OpenAI Chat Completions");
+
+        assert_eq!(output["object"], "chat.completion");
+        assert_eq!(output["choices"][0]["finish_reason"], "tool_calls");
+        let tool_call = &output["choices"][0]["message"]["tool_calls"][0];
+        assert!(tool_call["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("call_")));
+        assert_eq!(tool_call["type"], "function");
+        assert_eq!(tool_call["function"]["name"], "get_weather");
+        assert_eq!(tool_call["function"]["arguments"], "{\"city\":\"NYC\"}");
+        assert_eq!(output["usage"]["prompt_tokens"], 18);
+        assert_eq!(output["usage"]["completion_tokens"], 4);
+        assert_eq!(output["usage"]["total_tokens"], 22);
+    }
+
+    #[test]
     fn responses_to_chat_plugin_flattens_official_shell_output_chunks_for_codex() {
         let registry = plugins::built_in_plugin_registry();
         let plugin = registry
@@ -1005,6 +1781,39 @@ mod plugin_tests {
             .expect("shell tool output message");
         assert_eq!(tool_message["tool_call_id"], "call_shell_123");
         assert_eq!(tool_message["content"], "Cargo.toml\nwarning: ignored\n");
+    }
+
+    #[test]
+    fn responses_to_chat_plugin_maps_official_message_input_items() {
+        let registry = plugins::built_in_plugin_registry();
+        let plugin = registry
+            .resolve(
+                ApiSurface::OpenAiResponses,
+                ApiSurface::OpenAiChatCompletions,
+            )
+            .expect("Responses to Chat plugin");
+        let input = json!({
+            "model": "gpt-5.5",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Hello"}]
+            }]
+        });
+
+        let output = plugin
+            .transform_request(
+                &input,
+                &context(
+                    ApiSurface::OpenAiResponses,
+                    ApiSurface::OpenAiChatCompletions,
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(output["messages"][0]["role"], "user");
+        assert_eq!(output["messages"][0]["content"], "Hello");
+        assert!(output["messages"][0].get("type").is_none());
     }
 
     #[test]
@@ -1229,6 +2038,7 @@ pub fn transform_request_body(
         target_protocol: target,
         client_path: String::new(),
         client_base_path: String::new(),
+        upstream_model: None,
         model: body
             .get("model")
             .and_then(|v| v.as_str())
@@ -1256,6 +2066,7 @@ pub fn transform_response_body(
         target_protocol: source,
         client_path: String::new(),
         client_base_path: String::new(),
+        upstream_model: None,
         model: Some(model.to_owned()),
         is_streaming: false,
     };
@@ -1521,6 +2332,40 @@ mod tests {
     }
 
     #[test]
+    fn gemini_request_repeated_function_responses_keep_call_order() {
+        let gemini_body = serde_json::json!({
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {"functionCall": {"name": "lookup", "args": {"id": 1}}},
+                        {"functionCall": {"name": "lookup", "args": {"id": 2}}}
+                    ]
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {"functionResponse": {"name": "lookup", "response": {"value": "first"}}},
+                        {"functionResponse": {"name": "lookup", "response": {"value": "second"}}}
+                    ]
+                }
+            ]
+        });
+
+        let result = transform_request_body(&gemini_body, Protocol::Google, Protocol::Openai)
+            .expect("Gemini to OpenAI");
+        let messages = result["messages"].as_array().expect("messages");
+        let assistant_calls = messages[0]["tool_calls"].as_array().expect("tool calls");
+
+        assert_eq!(assistant_calls[0]["id"], "call_0");
+        assert_eq!(assistant_calls[1]["id"], "call_1");
+        assert_eq!(messages[1]["tool_call_id"], "call_0");
+        assert_eq!(messages[1]["content"], "{\"value\":\"first\"}");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+        assert_eq!(messages[2]["content"], "{\"value\":\"second\"}");
+    }
+
+    #[test]
     fn gemini_request_with_image_parts_maps_to_openai_content_parts() {
         let gemini_body = serde_json::json!({
             "contents": [{
@@ -1680,6 +2525,38 @@ mod tests {
     }
 
     #[test]
+    fn claude_refusal_response_maps_to_openai_responses_incomplete_content_filter() {
+        let context = sdkwork_lr_plugin::TransformContext {
+            source: sdkwork_lr_plugin::ApiSurface::OpenAiResponses,
+            target: sdkwork_lr_plugin::ApiSurface::AnthropicMessages,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Anthropic,
+            client_path: "/v1/responses".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: None,
+            model: Some("claude-sonnet-4-20250514".to_owned()),
+            is_streaming: false,
+        };
+        let result = transform_response_body_with_context(
+            &serde_json::json!({
+                "id": "msg_refusal",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-4-20250514",
+                "content": [{"type": "text", "text": "I cannot help with that."}],
+                "stop_reason": "refusal",
+                "usage": {"input_tokens": 10, "output_tokens": 4}
+            }),
+            &context,
+        )
+        .expect("Claude response to OpenAI Responses");
+
+        assert_eq!(result["object"], "response");
+        assert_eq!(result["status"], "incomplete");
+        assert_eq!(result["incomplete_details"]["reason"], "content_filter");
+    }
+
+    #[test]
     fn test_openai_to_gemini_response_transform() {
         let openai_response = serde_json::json!({
             "id": "chatcmpl-123",
@@ -1756,6 +2633,168 @@ mod tests {
         assert!(result.is_ok());
         let gemini_body = result.unwrap();
         assert!(gemini_body.get("contents").is_some());
+    }
+
+    #[test]
+    fn claude_messages_request_to_openai_chat_maps_tools_tool_choice_and_results() {
+        let context = sdkwork_lr_plugin::TransformContext {
+            source: sdkwork_lr_plugin::ApiSurface::AnthropicMessages,
+            target: sdkwork_lr_plugin::ApiSurface::OpenAiChatCompletions,
+            source_protocol: Protocol::Anthropic,
+            target_protocol: Protocol::Openai,
+            client_path: "/anthropic/v1/messages".to_owned(),
+            client_base_path: "/anthropic".to_owned(),
+            upstream_model: None,
+            model: Some("deepseek-v4-pro".to_owned()),
+            is_streaming: false,
+        };
+        let body = serde_json::json!({
+            "model": "deepseek-v4-pro",
+            "system": "Use concise answers.",
+            "max_tokens": 512,
+            "temperature": 0.2,
+            "stream": false,
+            "tools": [{
+                "name": "get_weather",
+                "description": "Get weather",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"]
+                }
+            }],
+            "tool_choice": {"type": "tool", "name": "get_weather"},
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "Weather?"}]},
+                {"role": "assistant", "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_123",
+                    "name": "get_weather",
+                    "input": {"city": "NYC"}
+                }]},
+                {"role": "user", "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_123",
+                    "content": [{"type": "text", "text": "{\"temp\":72}"}]
+                }]}
+            ]
+        });
+
+        let output = transform_request_body_with_context(&body, &context).unwrap();
+
+        assert_eq!(output["model"], "deepseek-v4-pro");
+        assert_eq!(output["max_tokens"], 512);
+        assert_eq!(output["temperature"], 0.2);
+        assert_eq!(output["stream"], false);
+        assert_eq!(output["messages"][0]["role"], "system");
+        assert_eq!(output["messages"][0]["content"], "Use concise answers.");
+        assert_eq!(output["messages"][1]["role"], "user");
+        assert_eq!(output["messages"][1]["content"], "Weather?");
+        assert_eq!(output["messages"][2]["role"], "assistant");
+        assert_eq!(output["messages"][2]["tool_calls"][0]["id"], "toolu_123");
+        assert_eq!(
+            output["messages"][2]["tool_calls"][0]["function"]["name"],
+            "get_weather"
+        );
+        assert_eq!(
+            output["messages"][2]["tool_calls"][0]["function"]["arguments"],
+            "{\"city\":\"NYC\"}"
+        );
+        assert_eq!(output["messages"][3]["role"], "tool");
+        assert_eq!(output["messages"][3]["tool_call_id"], "toolu_123");
+        assert_eq!(output["messages"][3]["content"], "{\"temp\":72}");
+        assert_eq!(output["tools"][0]["type"], "function");
+        assert_eq!(output["tools"][0]["function"]["name"], "get_weather");
+        assert_eq!(
+            output["tools"][0]["function"]["parameters"]["properties"]["city"]["type"],
+            "string"
+        );
+        assert_eq!(
+            output["tool_choice"],
+            serde_json::json!({"type": "function", "function": {"name": "get_weather"}})
+        );
+    }
+
+    #[test]
+    fn claude_messages_request_to_gemini_maps_tools_tool_choice_and_results() {
+        let context = sdkwork_lr_plugin::TransformContext {
+            source: sdkwork_lr_plugin::ApiSurface::AnthropicMessages,
+            target: sdkwork_lr_plugin::ApiSurface::GeminiGenerateContent,
+            source_protocol: Protocol::Anthropic,
+            target_protocol: Protocol::Google,
+            client_path: "/anthropic/v1/messages".to_owned(),
+            client_base_path: "/anthropic".to_owned(),
+            upstream_model: None,
+            model: Some("gemini-2.5-pro".to_owned()),
+            is_streaming: false,
+        };
+        let body = serde_json::json!({
+            "model": "gemini-2.5-pro",
+            "system": "Use concise answers.",
+            "max_tokens": 512,
+            "top_p": 0.8,
+            "tools": [{
+                "name": "get_weather",
+                "description": "Get weather",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"]
+                }
+            }],
+            "tool_choice": {"type": "tool", "name": "get_weather"},
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "Weather?"}]},
+                {"role": "assistant", "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_123",
+                    "name": "get_weather",
+                    "input": {"city": "NYC"}
+                }]},
+                {"role": "user", "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_123",
+                    "content": [{"type": "text", "text": "{\"temp\":72}"}]
+                }]}
+            ]
+        });
+
+        let output = transform_request_body_with_context(&body, &context).unwrap();
+
+        assert_eq!(
+            output["systemInstruction"]["parts"][0]["text"],
+            "Use concise answers."
+        );
+        assert_eq!(output["generationConfig"]["maxOutputTokens"], 512);
+        assert_eq!(output["generationConfig"]["topP"], 0.8);
+        assert_eq!(output["contents"][0]["role"], "user");
+        assert_eq!(output["contents"][0]["parts"][0]["text"], "Weather?");
+        assert_eq!(output["contents"][1]["role"], "model");
+        assert_eq!(
+            output["contents"][1]["parts"][0]["functionCall"]["name"],
+            "get_weather"
+        );
+        assert_eq!(
+            output["contents"][1]["parts"][0]["functionCall"]["args"]["city"],
+            "NYC"
+        );
+        assert_eq!(output["contents"][2]["role"], "user");
+        assert_eq!(
+            output["contents"][2]["parts"][0]["functionResponse"]["name"],
+            "get_weather"
+        );
+        assert_eq!(
+            output["contents"][2]["parts"][0]["functionResponse"]["response"],
+            serde_json::json!({"temp": 72})
+        );
+        assert_eq!(
+            output["tools"][0]["functionDeclarations"][0]["name"],
+            "get_weather"
+        );
+        assert_eq!(
+            output["toolConfig"]["functionCallingConfig"],
+            serde_json::json!({"mode": "ANY", "allowedFunctionNames": ["get_weather"]})
+        );
     }
 
     #[test]
@@ -1941,6 +2980,22 @@ mod tests {
         assert_eq!(openai_body["top_p"], 0.8);
         assert!(openai_body.get("top_k").is_none());
     }
+
+    #[test]
+    fn claude_request_accepts_stop_alias_for_openai_compatible_vendors() {
+        let claude_body = serde_json::json!({
+            "model": "claude-3",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "max_tokens": 1024,
+            "stop": ["END"]
+        });
+
+        let result = transform_request_body(&claude_body, Protocol::Anthropic, Protocol::Openai);
+
+        assert!(result.is_ok());
+        let openai_body = result.unwrap();
+        assert_eq!(openai_body["stop"], serde_json::json!(["END"]));
+    }
 }
 
 fn claude_request_to_openai(body: &Value) -> Result<Value, String> {
@@ -2010,9 +3065,23 @@ fn claude_request_to_openai(body: &Value) -> Result<Value, String> {
             if let Some(content_arr) = content.as_array() {
                 let content_parts = claude_content_blocks_to_openai_parts(content_arr);
                 if !content_parts.is_empty() {
+                    let content = if content_parts
+                        .iter()
+                        .any(|part| part.get("type").and_then(|v| v.as_str()) == Some("image_url"))
+                    {
+                        Value::Array(content_parts)
+                    } else {
+                        Value::String(
+                            content_parts
+                                .iter()
+                                .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
+                                .collect::<Vec<_>>()
+                                .join(""),
+                        )
+                    };
                     openai_messages.push(serde_json::json!({
                         "role": "user",
-                        "content": content_parts
+                        "content": content
                     }));
                     continue;
                 }
@@ -2098,7 +3167,7 @@ fn claude_request_to_openai(body: &Value) -> Result<Value, String> {
     if let Some(top_p) = body.get("top_p") {
         result["top_p"] = top_p.clone();
     }
-    if let Some(stop) = body.get("stop_sequences") {
+    if let Some(stop) = body.get("stop_sequences").or_else(|| body.get("stop")) {
         result["stop"] = stop.clone();
     }
     if let Some(stream) = body.get("stream") {
@@ -2150,7 +3219,7 @@ fn gemini_request_to_openai(body: &Value) -> Result<Value, String> {
     let contents_arr = contents.as_array().ok_or("contents must be an array")?;
 
     let mut openai_messages = Vec::new();
-    let mut tool_call_ids: std::collections::HashMap<String, String> =
+    let mut tool_call_ids: std::collections::HashMap<String, std::collections::VecDeque<String>> =
         std::collections::HashMap::new();
     let mut next_tool_call_index = 0usize;
 
@@ -2207,7 +3276,10 @@ fn gemini_request_to_openai(body: &Value) -> Result<Value, String> {
                 let arguments = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_owned());
                 let call_id = format!("call_{next_tool_call_index}");
                 next_tool_call_index += 1;
-                tool_call_ids.insert(name.to_owned(), call_id.clone());
+                tool_call_ids
+                    .entry(name.to_owned())
+                    .or_default()
+                    .push_back(call_id.clone());
                 Some(serde_json::json!({
                     "id": call_id,
                     "type": "function",
@@ -2228,8 +3300,8 @@ fn gemini_request_to_openai(body: &Value) -> Result<Value, String> {
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
                 let tool_call_id = tool_call_ids
-                    .get(name)
-                    .cloned()
+                    .get_mut(name)
+                    .and_then(|ids| ids.pop_front())
                     .unwrap_or_else(|| format!("call_{name}"));
                 let content = serde_json::to_string(&response).unwrap_or_default();
                 Some(serde_json::json!({

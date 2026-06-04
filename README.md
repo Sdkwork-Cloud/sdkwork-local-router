@@ -14,15 +14,15 @@ The server exposes three service-side API groups:
 - `local-router-open-api`: provider-compatible model proxy routes such as
   `/v1/*`, `/anthropic/*`, and `/google/*`; authenticated by local-router
   `client_api_key` records.
-- `local-router-app-api`: `/app/v3/api/router/*` app integration routes;
+- `local-router-app-api`: `/app/v3/api/local_router/*` app integration routes;
   authenticated from SDKWork auth/access tokens, JWT claims, or trusted subject
   headers supplied by the surrounding SDKWork runtime.
-- `local-router-backend-api`: `/backend/v3/api/router/*` operator and
+- `local-router-backend-api`: `/backend/v3/api/local_router/*` operator and
   control-plane routes for accounts, client API keys, usage, health, plugins,
   routing strategy, and API group manifests.
 
-`GET /backend/v3/api/router/api_groups` returns the machine-readable API group
-manifest. `GET /backend/v3/api/router/plugins` embeds the same groups together
+`GET /backend/v3/api/local_router/api_groups` returns the machine-readable API group
+manifest. `GET /backend/v3/api/local_router/plugins` embeds the same groups together
 with plugin standards, routing strategies, pipeline stages, and standard
 components.
 

@@ -9,6 +9,7 @@ pub struct AccountRow {
     pub provider: String,
     pub base_url: String,
     pub upstream_api_key: String,
+    pub upstream_auth_scheme: Option<String>,
     pub models: String,
     pub priority: i32,
     pub timeout_secs: i64,
@@ -16,7 +17,7 @@ pub struct AccountRow {
     pub retry_delay_ms: i64,
     pub anthropic_version: Option<String>,
     pub default_headers: Option<String>,
-    pub model_aliases: Option<String>,
+    pub model_route_mappings: Option<String>,
     pub enabled: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -29,6 +30,7 @@ pub struct NewAccount {
     pub provider: String,
     pub base_url: String,
     pub upstream_api_key: String,
+    pub upstream_auth_scheme: Option<String>,
     pub models: Vec<String>,
     pub priority: i32,
     pub timeout_secs: i64,
@@ -36,8 +38,34 @@ pub struct NewAccount {
     pub retry_delay_ms: i64,
     pub anthropic_version: Option<String>,
     pub default_headers: std::collections::BTreeMap<String, String>,
-    pub model_aliases: std::collections::BTreeMap<String, String>,
+    pub model_route_mappings: std::collections::BTreeMap<String, String>,
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ModelRouteMappingRow {
+    pub id: i64,
+    pub user_id: i64,
+    pub account_id: i64,
+    pub account_name: String,
+    pub client_model: String,
+    pub upstream_model: String,
+    pub enabled: bool,
+    pub notes: Option<String>,
+    pub version: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewModelRouteMapping {
+    pub user_id: i64,
+    pub account_id: i64,
+    pub account_name: String,
+    pub client_model: String,
+    pub upstream_model: String,
+    pub enabled: bool,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

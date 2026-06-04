@@ -927,6 +927,7 @@ mod tests {
             provider: ProviderKind::Openai,
             base_url: "https://example.test".to_owned(),
             upstream_api_key: "secret".to_owned(),
+            upstream_auth_scheme: None,
             models: vec!["*".to_owned()],
             priority: 10,
             timeout: Duration::from_secs(30),
@@ -935,7 +936,7 @@ mod tests {
             anthropic_version: None,
             default_headers: BTreeMap::new(),
             enabled: true,
-            model_aliases: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
         })
     }
 

@@ -4,8 +4,8 @@ pub const LOCAL_ROUTER_OPEN_API: &str = "local-router-open-api";
 pub const LOCAL_ROUTER_APP_API: &str = "local-router-app-api";
 pub const LOCAL_ROUTER_BACKEND_API: &str = "local-router-backend-api";
 
-pub const LOCAL_ROUTER_APP_API_PREFIX: &str = "/app/v3/api/router";
-pub const LOCAL_ROUTER_BACKEND_API_PREFIX: &str = "/backend/v3/api/router";
+pub const LOCAL_ROUTER_APP_API_PREFIX: &str = "/app/v3/api/local_router";
+pub const LOCAL_ROUTER_BACKEND_API_PREFIX: &str = "/backend/v3/api/local_router";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct LocalRouterApiGroup {

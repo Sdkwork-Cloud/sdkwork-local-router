@@ -44,12 +44,14 @@ impl Default for RoutingStrategy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Account {
     pub name: String,
     pub provider: ProviderKind,
     pub base_url: String,
     #[serde(skip_serializing, default)]
     pub upstream_api_key: String,
+    pub upstream_auth_scheme: Option<String>,
     pub models: Vec<String>,
     pub priority: u32,
     #[serde(with = "duration_secs")]
@@ -60,7 +62,8 @@ pub struct Account {
     pub anthropic_version: Option<String>,
     pub default_headers: BTreeMap<String, String>,
     pub enabled: bool,
-    pub model_aliases: BTreeMap<String, String>,
+    #[serde(default)]
+    pub model_route_mappings: BTreeMap<String, String>,
 }
 
 fn default_retry_delay() -> u64 {
@@ -238,7 +241,9 @@ impl AccountPool {
             .iter()
             .filter(|s| {
                 s.account.enabled
-                    && model.map_or(true, |model| model_matches(model, &s.account.models))
+                    && model.map_or(true, |model| {
+                        account_matches_model(s.account.as_ref(), model)
+                    })
                     && self.health_manager.is_available(&s.account.name)
             })
             .collect()
@@ -280,6 +285,14 @@ fn average_latency_key(state: &AccountState) -> u64 {
     state.total_latency_ms.load(Ordering::Relaxed) / reqs
 }
 
+fn account_matches_model(account: &Account, requested_model: &str) -> bool {
+    model_matches(requested_model, &account.models)
+        || account
+            .model_route_mappings
+            .get(requested_model)
+            .is_some_and(|upstream_model| model_matches(upstream_model, &account.models))
+}
+
 fn model_matches(model: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|p| {
         if p == "*" || p == ".*" {
@@ -317,6 +330,7 @@ mod tests {
             provider: ProviderKind::Openai,
             base_url: "https://api.openai.com".to_owned(),
             upstream_api_key: "test-key".to_owned(),
+            upstream_auth_scheme: None,
             models: models.into_iter().map(String::from).collect(),
             priority,
             timeout: Duration::from_secs(30),
@@ -325,7 +339,7 @@ mod tests {
             anthropic_version: None,
             default_headers: BTreeMap::new(),
             enabled: true,
-            model_aliases: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
         }
     }
 
@@ -450,6 +464,21 @@ mod tests {
     }
 
     #[test]
+    fn select_by_client_model_route_mapping_matches_upstream_model_patterns() {
+        let mut gemini = make_account("gemini", vec!["gemini-*"], 10);
+        gemini
+            .model_route_mappings
+            .insert("gpt-5.5".to_owned(), "gemini-2.5-pro".to_owned());
+        let pool = AccountPool::new(vec![gemini]);
+
+        let selected = pool.select("gpt-5.5").expect(
+            "client model route mapping should route to account that supports the mapped model",
+        );
+
+        assert_eq!(selected.name, "gemini");
+    }
+
+    #[test]
     fn round_robin_strategy() {
         let pool = AccountPool::with_strategy(
             vec![
@@ -479,12 +508,46 @@ mod tests {
 
     #[test]
     fn account_serialization_roundtrip() {
-        let account = make_account("test", vec!["gpt-*"], 10);
+        let mut account = make_account("test", vec!["gpt-*"], 10);
+        account
+            .model_route_mappings
+            .insert("gpt-5.5".to_owned(), "gemini-2.5-pro".to_owned());
         let json = serde_json::to_string(&account).unwrap();
         assert!(!json.contains("upstream_api_key"));
+        assert!(json.contains("model_route_mappings"));
         let deserialized: Account = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.name, "test");
         assert_eq!(deserialized.timeout, Duration::from_secs(30));
         assert!(deserialized.upstream_api_key.is_empty());
+        assert_eq!(
+            deserialized
+                .model_route_mappings
+                .get("gpt-5.5")
+                .map(String::as_str),
+            Some("gemini-2.5-pro")
+        );
+    }
+
+    #[test]
+    fn account_deserialization_rejects_unknown_mapping_field() {
+        let json = r#"{
+            "name": "invalid",
+            "provider": "openai",
+            "base_url": "https://api.example/v1",
+            "upstream_auth_scheme": null,
+            "models": ["*"],
+            "priority": 10,
+            "timeout": 30,
+            "max_retries": 0,
+            "retry_delay_ms": 500,
+            "anthropic_version": null,
+            "default_headers": {},
+            "enabled": true,
+            "model_routes": {"gpt-5.5": "gemini-2.5-pro"}
+        }"#;
+
+        let error = serde_json::from_str::<Account>(json).unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `model_routes`"));
     }
 }

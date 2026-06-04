@@ -63,7 +63,7 @@ fn built_in_plugins() -> Vec<Arc<dyn ApiTransformPlugin>> {
         plugin(
             ApiSurface::OpenAiChatCompletions,
             ApiSurface::OpenAiResponses,
-            PluginCapabilities::full_json(),
+            PluginCapabilities::full_streaming_json(),
             "Convert OpenAI Chat Completions API requests and responses to OpenAI Responses API.",
             vec!["OPENAI_COMPATIBLE_CHAT_TO_RESPONSE_API"],
             chat_request_to_responses,
@@ -72,7 +72,7 @@ fn built_in_plugins() -> Vec<Arc<dyn ApiTransformPlugin>> {
         plugin(
             ApiSurface::OpenAiResponses,
             ApiSurface::OpenAiChatCompletions,
-            PluginCapabilities::full_json(),
+            PluginCapabilities::full_streaming_json(),
             "Convert OpenAI Responses API requests and responses to OpenAI Chat Completions API.",
             vec!["OPENAI_COMPATIBLE_RESPONSE_TO_CHAT_API"],
             responses_request_to_chat,
@@ -99,11 +99,12 @@ fn built_in_plugins() -> Vec<Arc<dyn ApiTransformPlugin>> {
         plugin(
             ApiSurface::OpenAiResponses,
             ApiSurface::AnthropicMessages,
-            PluginCapabilities::full_json(),
+            PluginCapabilities::full_streaming_json(),
             "Convert OpenAI Responses API to Anthropic Messages API.",
             vec![
-                "OPENAI_COMPATIBLE_RESPONSE_TO_CLADUE_MESSAGE_API",
                 "OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGE_API",
+                "OPENAI_COMPATIBLE_RESPONSE_TO_CLAUDE_MESSAGES_API",
+                "OPENAI_COMPATIBLE_RESPONSE_TO_ANTHROPIC_MESSAGES_API",
             ],
             responses_request_to_claude,
             claude_response_to_responses,
@@ -111,7 +112,7 @@ fn built_in_plugins() -> Vec<Arc<dyn ApiTransformPlugin>> {
         plugin(
             ApiSurface::OpenAiResponses,
             ApiSurface::GeminiGenerateContent,
-            PluginCapabilities::full_json(),
+            PluginCapabilities::full_streaming_json(),
             "Convert OpenAI Responses API to Gemini GenerateContent API.",
             vec!["OPENAI_COMPATIBLE_RESPONSE_TO_GEMINI_MESSAGE_API"],
             responses_request_to_gemini,
@@ -144,7 +145,7 @@ fn built_in_plugins() -> Vec<Arc<dyn ApiTransformPlugin>> {
         plugin(
             ApiSurface::AnthropicMessages,
             ApiSurface::OpenAiResponses,
-            PluginCapabilities::full_json(),
+            PluginCapabilities::full_streaming_json(),
             "Convert Anthropic Messages API to OpenAI Responses API.",
             vec![
                 "CLAUDE_MESSAGE_TO_OPENAI_RESPONSE_API",
@@ -156,7 +157,7 @@ fn built_in_plugins() -> Vec<Arc<dyn ApiTransformPlugin>> {
         plugin(
             ApiSurface::GeminiGenerateContent,
             ApiSurface::OpenAiResponses,
-            PluginCapabilities::full_json(),
+            PluginCapabilities::full_streaming_json(),
             "Convert Gemini GenerateContent API to OpenAI Responses API.",
             vec![
                 "GEMINI_MESSAGE_TO_OPENAI_RESPONSE_API",
@@ -168,7 +169,7 @@ fn built_in_plugins() -> Vec<Arc<dyn ApiTransformPlugin>> {
         plugin(
             ApiSurface::AnthropicMessages,
             ApiSurface::GeminiGenerateContent,
-            PluginCapabilities::full_json(),
+            PluginCapabilities::full_streaming_json(),
             "Convert Anthropic Messages API to Gemini GenerateContent API through OpenAI Chat canonical shape.",
             vec![],
             claude_request_to_gemini,
@@ -177,7 +178,7 @@ fn built_in_plugins() -> Vec<Arc<dyn ApiTransformPlugin>> {
         plugin(
             ApiSurface::GeminiGenerateContent,
             ApiSurface::AnthropicMessages,
-            PluginCapabilities::full_json(),
+            PluginCapabilities::full_streaming_json(),
             "Convert Gemini GenerateContent API to Anthropic Messages API through OpenAI Chat canonical shape.",
             vec![],
             gemini_request_to_claude,
@@ -647,6 +648,10 @@ fn reserved_batch_transform(
 }
 
 fn response_input_item_to_chat_message(item: &Value) -> Option<Value> {
+    if item.get("type").and_then(|v| v.as_str()) == Some("reasoning") {
+        return None;
+    }
+
     if item.get("type").and_then(|v| v.as_str()) == Some("function_call") {
         let call_id = item
             .get("call_id")
@@ -662,6 +667,37 @@ fn response_input_item_to_chat_message(item: &Value) -> Option<Value> {
                 "function": {
                     "name": item.get("name").and_then(|v| v.as_str()).unwrap_or(""),
                     "arguments": item.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}")
+                }
+            }]
+        }));
+    }
+
+    if matches!(
+        item.get("type").and_then(|v| v.as_str()),
+        Some("shell_call" | "local_shell_call")
+    ) {
+        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let call_id = item
+            .get("call_id")
+            .or_else(|| item.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let name = if item_type == "local_shell_call" {
+            "local_shell"
+        } else {
+            "shell"
+        };
+        let action = item.get("action").cloned().unwrap_or_else(|| json!({}));
+        let arguments = serde_json::to_string(&action).unwrap_or_else(|_| "{}".to_owned());
+        return Some(json!({
+            "role": "assistant",
+            "content": Value::Null,
+            "tool_calls": [{
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": arguments
                 }
             }]
         }));

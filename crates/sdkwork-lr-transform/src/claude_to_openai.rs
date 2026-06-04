@@ -53,9 +53,10 @@ pub fn transform_response(claude_body: &Value, model: &str) -> Result<Value, Str
 
     let text = text_parts.join("");
     let finish_reason = match stop_reason {
-        Some("end_turn") | Some("stop") => "stop",
-        Some("max_tokens") => "length",
+        Some("end_turn") | Some("stop") | Some("pause_turn") => "stop",
+        Some("max_tokens") | Some("model_context_window_exceeded") => "length",
         Some("tool_use") => "tool_calls",
+        Some("refusal") => "content_filter",
         _ => "stop",
     };
 
@@ -140,5 +141,31 @@ mod tests {
             result["choices"][0]["message"]["content"],
             serde_json::Value::Null
         );
+    }
+
+    #[test]
+    fn context_window_stop_reason_maps_to_openai_length_finish() {
+        let input = json!({
+            "id": "msg_context",
+            "content": [{"type": "text", "text": ""}],
+            "stop_reason": "model_context_window_exceeded",
+            "usage": {"input_tokens": 100, "output_tokens": 1}
+        });
+
+        let result = transform_response(&input, "claude-3-sonnet").unwrap();
+        assert_eq!(result["choices"][0]["finish_reason"], "length");
+    }
+
+    #[test]
+    fn pause_turn_stop_reason_maps_to_openai_stop_finish() {
+        let input = json!({
+            "id": "msg_pause",
+            "content": [{"type": "text", "text": ""}],
+            "stop_reason": "pause_turn",
+            "usage": {"input_tokens": 100, "output_tokens": 1}
+        });
+
+        let result = transform_response(&input, "claude-3-sonnet").unwrap();
+        assert_eq!(result["choices"][0]["finish_reason"], "stop");
     }
 }

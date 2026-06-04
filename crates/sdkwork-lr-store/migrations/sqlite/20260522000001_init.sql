@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS local_router_upstream_accounts (
     retry_delay_ms      INTEGER NOT NULL DEFAULT 500,
     anthropic_version   TEXT,
     default_headers     TEXT    DEFAULT '{}',
-    model_aliases       TEXT    DEFAULT '{}',
+    model_route_mappings TEXT  DEFAULT '{}',
     enabled             INTEGER NOT NULL DEFAULT 1,
     created_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),

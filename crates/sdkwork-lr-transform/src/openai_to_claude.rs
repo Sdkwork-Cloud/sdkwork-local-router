@@ -77,7 +77,7 @@ pub fn transform_request(openai_body: &Value) -> Result<Value, String> {
                     .get("tool_call_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let tool_content = content.as_str().unwrap_or("");
+                let tool_content = chat_tool_content_to_string(&content);
 
                 claude_messages.push(json!({
                     "role": "user",
@@ -176,10 +176,22 @@ pub fn transform_request(openai_body: &Value) -> Result<Value, String> {
     Ok(result)
 }
 
+fn chat_tool_content_to_string(content: &Value) -> String {
+    content
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| content.to_string())
+}
+
 fn openai_content_to_claude_content(content: &Value) -> Value {
+    let blocks = openai_content_to_claude_blocks(content);
+    if !blocks.is_empty() {
+        return Value::Array(blocks);
+    }
+
     match content {
-        Value::String(_) | Value::Null => content.clone(),
-        Value::Array(_) => Value::Array(openai_content_to_claude_blocks(content)),
+        Value::String(text) => Value::String(text.clone()),
+        Value::Null => Value::String(String::new()),
         _ => Value::String(content.to_string()),
     }
 }
@@ -281,9 +293,15 @@ mod tests {
         let result = transform_request(&input).unwrap();
         assert_eq!(result["system"], "You are helpful.");
         assert_eq!(result["messages"][0]["role"], "user");
-        assert_eq!(result["messages"][0]["content"], "Hello");
+        assert_eq!(
+            result["messages"][0]["content"],
+            json!([{"type": "text", "text": "Hello"}])
+        );
         assert_eq!(result["messages"][1]["role"], "assistant");
-        assert_eq!(result["messages"][1]["content"], "Hi there!");
+        assert_eq!(
+            result["messages"][1]["content"],
+            json!([{"type": "text", "text": "Hi there!"}])
+        );
         assert_eq!(result["max_tokens"], 4096);
     }
 

@@ -22,7 +22,7 @@ pub struct RuntimeTomlConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ServerSectionConfig {
     pub bind: Option<String>,
     pub port: Option<u16>,
@@ -30,21 +30,21 @@ pub struct ServerSectionConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct StorageSectionConfig {
     pub database_url: Option<String>,
     pub encryption_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct LoggingSectionConfig {
     pub level: Option<String>,
     pub format: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct BasePathSectionConfig {
     pub openai: Option<String>,
     pub anthropic: Option<String>,
@@ -52,13 +52,13 @@ pub struct BasePathSectionConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct UpstreamSectionConfig {
     pub name: String,
     pub provider: String,
     pub base_url: String,
-    #[serde(alias = "api_key")]
     pub upstream_api_key: Option<String>,
+    pub upstream_auth_scheme: Option<String>,
     pub models: Vec<String>,
     pub priority: Option<u32>,
     pub timeout_secs: Option<u64>,
@@ -66,18 +66,18 @@ pub struct UpstreamSectionConfig {
     pub retry_delay_ms: Option<u64>,
     pub anthropic_version: Option<String>,
     pub default_headers: BTreeMap<String, String>,
-    pub model_aliases: BTreeMap<String, String>,
+    pub model_route_mappings: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct FallbackSectionConfig {
     pub enabled: Option<bool>,
     pub max_attempts: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RateLimitSectionConfig {
     pub enabled: Option<bool>,
     pub max_requests: Option<u64>,
@@ -85,19 +85,19 @@ pub struct RateLimitSectionConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CorsSectionConfig {
     pub allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RoutingSectionConfig {
     pub strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RecordingSectionConfig {
     pub save_request_body: Option<bool>,
     pub save_response_body: Option<bool>,
@@ -105,7 +105,7 @@ pub struct RecordingSectionConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CircuitBreakerSectionConfig {
     pub failure_threshold: Option<u32>,
     pub success_threshold: Option<u32>,
@@ -114,7 +114,7 @@ pub struct CircuitBreakerSectionConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct HealthProbeSectionConfig {
     pub enabled: Option<bool>,
     pub interval_secs: Option<u64>,
@@ -122,7 +122,7 @@ pub struct HealthProbeSectionConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct PluginSectionConfig {
     pub enabled: Option<bool>,
     pub policy: Option<String>,
@@ -191,6 +191,7 @@ pub struct UpstreamConfig {
     pub provider: sdkwork_lr_core::ProviderKind,
     pub base_url: String,
     pub upstream_api_key: String,
+    pub upstream_auth_scheme: Option<String>,
     pub models: Vec<String>,
     pub priority: u32,
     pub timeout: Duration,
@@ -198,7 +199,7 @@ pub struct UpstreamConfig {
     pub retry_delay_ms: u64,
     pub anthropic_version: Option<String>,
     pub default_headers: BTreeMap<String, String>,
-    pub model_aliases: BTreeMap<String, String>,
+    pub model_route_mappings: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -399,6 +400,18 @@ impl RuntimeConfig {
             if u.base_url.is_empty() {
                 return Err(format!("upstream {}: base_url must not be blank", u.name));
             }
+            let upstream_auth_scheme = match canonical_upstream_auth_scheme(
+                u.upstream_auth_scheme.as_deref(),
+            ) {
+                Some(Some(auth_scheme)) => Some(auth_scheme.to_owned()),
+                Some(None) => None,
+                None => {
+                    return Err(format!(
+                            "upstream {}: upstream_auth_scheme must be one of: bearer, x-api-key, x-goog-api-key, query-key",
+                            u.name
+                        ));
+                }
+            };
             let upstream_api_key =
                 resolve_env_or_value(u.upstream_api_key.as_deref()).unwrap_or_default();
             upstreams.push(UpstreamConfig {
@@ -406,6 +419,7 @@ impl RuntimeConfig {
                 provider: sdkwork_lr_core::ProviderKind::from_str_loose(&u.provider),
                 base_url: u.base_url.trim_end_matches('/').to_owned(),
                 upstream_api_key,
+                upstream_auth_scheme,
                 models: u.models.clone(),
                 priority: u.priority.unwrap_or(10),
                 timeout: Duration::from_secs(u.timeout_secs.unwrap_or(120)),
@@ -413,7 +427,7 @@ impl RuntimeConfig {
                 retry_delay_ms: u.retry_delay_ms.unwrap_or(500),
                 anthropic_version: u.anthropic_version.clone(),
                 default_headers: u.default_headers.clone(),
-                model_aliases: u.model_aliases.clone(),
+                model_route_mappings: u.model_route_mappings.clone(),
             });
         }
         let upstream_count = upstreams.len();
@@ -660,6 +674,20 @@ fn resolve_env_or_value(value: Option<&str>) -> Option<String> {
     }
 }
 
+fn canonical_upstream_auth_scheme(value: Option<&str>) -> Option<Option<&'static str>> {
+    let Some(value) = value else {
+        return Some(None);
+    };
+    match value.trim().replace('-', "_").to_ascii_lowercase().as_str() {
+        "" => Some(None),
+        "bearer" | "authorization_bearer" => Some(Some("bearer")),
+        "x_api_key" | "anthropic_x_api_key" => Some(Some("x-api-key")),
+        "x_goog_api_key" | "google_api_key" => Some(Some("x-goog-api-key")),
+        "query_key" | "key_query" | "google_query_key" => Some(Some("query-key")),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -671,6 +699,7 @@ mod tests {
             provider: "openai".to_owned(),
             base_url: format!("https://{name}.example/v1"),
             upstream_api_key: Some("sk-test".to_owned()),
+            upstream_auth_scheme: None,
             models: vec!["*".to_owned()],
             priority: Some(10),
             timeout_secs: None,
@@ -678,7 +707,7 @@ mod tests {
             retry_delay_ms: None,
             anthropic_version: None,
             default_headers: BTreeMap::new(),
-            model_aliases: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
         }
     }
 
@@ -778,7 +807,7 @@ mod tests {
         let toml_config: RuntimeTomlConfig = toml::from_str(
             r#"
             [plugins]
-            policy = "legacy-shim"
+            policy = "invalid-shim"
             "#,
         )
         .unwrap();
@@ -789,15 +818,147 @@ mod tests {
     }
 
     #[test]
-    fn config_rejects_legacy_auth_section() {
+    fn upstream_auth_scheme_accepts_aliases_and_stores_canonical_code() {
+        let mut upstream = upstream("deepseek-anthropic");
+        upstream.provider = "anthropic".to_owned();
+        upstream.upstream_auth_scheme = Some("authorization_bearer".to_owned());
+        let toml_config = RuntimeTomlConfig {
+            upstreams: vec![upstream],
+            ..RuntimeTomlConfig::default()
+        };
+
+        let config = RuntimeConfig::from_toml(&toml_config).unwrap();
+
+        assert_eq!(
+            config.upstreams[0].upstream_auth_scheme.as_deref(),
+            Some("bearer")
+        );
+    }
+
+    #[test]
+    fn upstream_auth_scheme_rejects_unknown_code() {
+        let mut upstream = upstream("bad-auth");
+        upstream.upstream_auth_scheme = Some("unsupported-unknown-key".to_owned());
+        let toml_config = RuntimeTomlConfig {
+            upstreams: vec![upstream],
+            ..RuntimeTomlConfig::default()
+        };
+
+        let error = RuntimeConfig::from_toml(&toml_config).unwrap_err();
+
+        assert!(error.contains("upstream_auth_scheme must be one of"));
+    }
+
+    #[test]
+    fn upstream_model_route_mappings_are_canonical_config() {
+        let toml_config: RuntimeTomlConfig = toml::from_str(
+            r#"
+            [[upstreams]]
+            name = "gemini"
+            provider = "google"
+            base_url = "https://generativelanguage.googleapis.com"
+            upstream_api_key = "sk-test"
+            models = ["gemini-*"]
+
+            [upstreams.model_route_mappings]
+            "gpt-5.5" = "gemini-2.5-pro"
+            "#,
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::from_toml(&toml_config).unwrap();
+
+        assert_eq!(
+            config.upstreams[0]
+                .model_route_mappings
+                .get("gpt-5.5")
+                .map(String::as_str),
+            Some("gemini-2.5-pro")
+        );
+    }
+
+    #[test]
+    fn unknown_upstream_mapping_section_is_rejected() {
         let error = RuntimeTomlConfig::from_str_strict(
             r#"
-            [auth]
-            mode = "legacy"
+            [[upstreams]]
+            name = "gemini"
+            provider = "google"
+            base_url = "https://generativelanguage.googleapis.com"
+            upstream_api_key = "sk-test"
+            models = ["gemini-*"]
+
+            [upstreams.model_routes]
+            "gpt-5.5" = "gemini-2.5-flash"
             "#,
         )
         .unwrap_err();
 
-        assert!(error.contains("unknown field `auth`"));
+        assert!(error.contains("unknown field `model_routes`"));
+        assert!(error.contains("model_route_mappings"));
+    }
+
+    #[test]
+    fn config_rejects_ambiguous_upstream_api_key_alias() {
+        let error = RuntimeTomlConfig::from_str_strict(
+            r#"
+            [[upstreams]]
+            name = "ambiguous-key"
+            provider = "openai"
+            base_url = "https://api.example/v1"
+            api_key = "sk-upstream"
+            models = ["*"]
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("unknown field `api_key`"));
+        assert!(error.contains("upstream_api_key"));
+    }
+
+    #[test]
+    fn config_rejects_unknown_nested_fields() {
+        let error = RuntimeTomlConfig::from_str_strict(
+            r#"
+            [plugins]
+            plugin_policy = "strict"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("unknown field `plugin_policy`"));
+        assert!(error.contains("policy"));
+    }
+
+    #[test]
+    fn repository_example_config_is_strictly_valid() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let example_path = manifest_dir
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("workspace root")
+            .join("config.example.toml");
+        let content = std::fs::read_to_string(&example_path).unwrap();
+
+        let toml_config = RuntimeTomlConfig::from_str_strict(&content).unwrap();
+        let config = RuntimeConfig::from_toml(&toml_config).unwrap();
+
+        assert!(config
+            .upstreams
+            .iter()
+            .any(|upstream| upstream.model_route_mappings.contains_key("gpt-5.5")));
+    }
+
+    #[test]
+    fn config_rejects_unknown_top_level_section() {
+        let error = RuntimeTomlConfig::from_str_strict(
+            r#"
+            [removed_section]
+            token = "removed"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("unknown field `removed_section`"));
     }
 }

@@ -10,6 +10,7 @@ use tokio::signal;
 
 use crate::rate_limit::RateLimiter;
 use crate::router;
+use crate::upstream_auth::auth_from_scheme;
 use sdkwork_lr_config::RuntimeConfig;
 use sdkwork_lr_core::{Account, HealthManager, HealthState};
 use sdkwork_lr_proxy::ProxyClient;
@@ -208,6 +209,7 @@ fn spawn_config_watcher(
                                     provider: u.provider.clone(),
                                     base_url: u.base_url.clone(),
                                     upstream_api_key: u.upstream_api_key.clone(),
+                                    upstream_auth_scheme: u.upstream_auth_scheme.clone(),
                                     models: u.models.clone(),
                                     priority: u.priority,
                                     timeout: u.timeout,
@@ -216,7 +218,7 @@ fn spawn_config_watcher(
                                     anthropic_version: u.anthropic_version.clone(),
                                     default_headers: u.default_headers.clone(),
                                     enabled: true,
-                                    model_aliases: u.model_aliases.clone(),
+                                    model_route_mappings: u.model_route_mappings.clone(),
                                 })
                                 .collect();
 
@@ -225,9 +227,10 @@ fn spawn_config_watcher(
                                 let new_account = sdkwork_lr_store::NewAccount {
                                     user_id: sdkwork_lr_store::DEFAULT_USER_ID,
                                     name: acc.name.clone(),
-                                    provider: format!("{:?}", acc.provider),
+                                    provider: acc.provider.to_string(),
                                     base_url: acc.base_url.clone(),
                                     upstream_api_key: acc.upstream_api_key.clone(),
+                                    upstream_auth_scheme: acc.upstream_auth_scheme.clone(),
                                     models: acc.models.clone(),
                                     priority: acc.priority as i32,
                                     timeout_secs: acc.timeout.as_secs() as i64,
@@ -235,7 +238,7 @@ fn spawn_config_watcher(
                                     retry_delay_ms: acc.retry_delay_ms as i64,
                                     anthropic_version: acc.anthropic_version.clone(),
                                     default_headers: acc.default_headers.clone(),
-                                    model_aliases: acc.model_aliases.clone(),
+                                    model_route_mappings: acc.model_route_mappings.clone(),
                                     enabled: acc.enabled,
                                 };
                                 let _ = store_for_reload.upsert_account(&new_account).await;
@@ -419,6 +422,12 @@ fn build_probe_auth(account: &Account) -> Option<sdkwork_lr_proxy::AuthInjection
     if account.upstream_api_key.is_empty() {
         return None;
     }
+    if let Some(auth) = auth_from_scheme(
+        account.upstream_auth_scheme.as_deref(),
+        &account.upstream_api_key,
+    ) {
+        return Some(auth);
+    }
     match account.provider {
         ProviderKind::Openai | ProviderKind::Custom(_) => Some(
             sdkwork_lr_proxy::AuthInjection::Bearer(account.upstream_api_key.clone()),
@@ -502,6 +511,7 @@ mod tests {
             provider: sdkwork_lr_core::ProviderKind::Anthropic,
             base_url: "https://api.anthropic.com".to_owned(),
             upstream_api_key: "sk-ant".to_owned(),
+            upstream_auth_scheme: None,
             models: vec!["claude-*".to_owned()],
             priority: 10,
             timeout: Duration::from_secs(30),
@@ -510,7 +520,7 @@ mod tests {
             anthropic_version: None,
             default_headers: BTreeMap::new(),
             enabled: true,
-            model_aliases: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
         };
 
         assert_eq!(

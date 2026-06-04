@@ -1,4 +1,4 @@
 -- Retry configuration is part of the initial local_router_upstream_accounts
 -- schema. This migration version is intentionally retained as a no-op so
--- existing migration histories remain ordered without reintroducing legacy
+-- existing migration histories remain ordered without reintroducing removed
 -- unprefixed table names.

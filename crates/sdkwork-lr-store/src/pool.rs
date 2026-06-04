@@ -6,6 +6,7 @@ use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 
 const ACCOUNTS_TABLE: &str = "local_router_upstream_accounts";
+const MODEL_ROUTE_MAPPINGS_TABLE: &str = "local_router_model_route_mappings";
 const CLIENT_API_KEYS_TABLE: &str = "local_router_client_api_keys";
 const INVOCATIONS_TABLE: &str = "local_router_invocations";
 const USAGES_TABLE: &str = "local_router_usages";
@@ -58,6 +59,13 @@ impl Store {
                 .execute(&pool)
                 .await
                 .map_err(|e| StoreError::Connection(format!("failed to set busy_timeout: {e}")))?;
+
+            sqlx::query("PRAGMA foreign_keys=ON")
+                .execute(&pool)
+                .await
+                .map_err(|e| {
+                    StoreError::Connection(format!("failed to enable foreign_keys: {e}"))
+                })?;
 
             Ok(Self {
                 pool: DatabasePool::Sqlite(pool),
@@ -346,33 +354,51 @@ impl Store {
             serde_json::to_string(&account.models).unwrap_or_else(|_| "[]".to_owned());
         let headers_json =
             serde_json::to_string(&account.default_headers).unwrap_or_else(|_| "{}".to_owned());
-        let aliases_json =
-            serde_json::to_string(&account.model_aliases).unwrap_or_else(|_| "{}".to_owned());
+        let route_mappings_json = serde_json::to_string(&account.model_route_mappings)
+            .unwrap_or_else(|_| "{}".to_owned());
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 let result = sqlx::query(&format!(
-                    "INSERT INTO {ACCOUNTS_TABLE} (user_id, name, provider, base_url, upstream_api_key, models, priority, timeout_secs, max_retries, retry_delay_ms, anthropic_version, default_headers, model_aliases, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO {ACCOUNTS_TABLE} (user_id, name, provider, base_url, upstream_api_key, upstream_auth_scheme, models, priority, timeout_secs, max_retries, retry_delay_ms, anthropic_version, default_headers, model_route_mappings, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 ))
                 .bind(account.user_id).bind(&account.name).bind(&account.provider).bind(&account.base_url).bind(&encrypted_upstream_api_key)
+                .bind(&account.upstream_auth_scheme)
                 .bind(&models_json).bind(account.priority).bind(account.timeout_secs)
                 .bind(account.max_retries).bind(account.retry_delay_ms)
-                .bind(&account.anthropic_version).bind(&headers_json).bind(&aliases_json)
+                .bind(&account.anthropic_version).bind(&headers_json).bind(&route_mappings_json)
                 .bind(account.enabled)
                 .execute(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
-                Ok(result.last_insert_rowid())
+                let account_id = result.last_insert_rowid();
+                self.replace_model_route_mappings_for_account_from_map(
+                    account.user_id,
+                    account_id,
+                    &account.name,
+                    &account.model_route_mappings,
+                )
+                .await?;
+                Ok(account_id)
             }
             DatabasePool::Postgres(pool) => {
                 let row = sqlx::query(&format!(
-                    "INSERT INTO {ACCOUNTS_TABLE} (user_id, name, provider, base_url, upstream_api_key, models, priority, timeout_secs, max_retries, retry_delay_ms, anthropic_version, default_headers, model_aliases, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id"
+                    "INSERT INTO {ACCOUNTS_TABLE} (user_id, name, provider, base_url, upstream_api_key, upstream_auth_scheme, models, priority, timeout_secs, max_retries, retry_delay_ms, anthropic_version, default_headers, model_route_mappings, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id"
                 ))
                 .bind(account.user_id).bind(&account.name).bind(&account.provider).bind(&account.base_url).bind(&encrypted_upstream_api_key)
+                .bind(&account.upstream_auth_scheme)
                 .bind(&models_json).bind(account.priority).bind(account.timeout_secs)
                 .bind(account.max_retries).bind(account.retry_delay_ms)
-                .bind(&account.anthropic_version).bind(&headers_json).bind(&aliases_json)
+                .bind(&account.anthropic_version).bind(&headers_json).bind(&route_mappings_json)
                 .bind(account.enabled)
                 .fetch_one(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
-                Ok(row.get::<i64, _>("id"))
+                let account_id = row.get::<i64, _>("id");
+                self.replace_model_route_mappings_for_account_from_map(
+                    account.user_id,
+                    account_id,
+                    &account.name,
+                    &account.model_route_mappings,
+                )
+                .await?;
+                Ok(account_id)
             }
         }
     }
@@ -388,37 +414,72 @@ impl Store {
         id: i64,
         account: &NewAccount,
     ) -> Result<(), StoreError> {
+        self.update_account_for_user_with_route_mapping_sync(user_id, id, account, true)
+            .await
+    }
+
+    pub async fn update_account_for_user_without_route_mapping_sync(
+        &self,
+        user_id: i64,
+        id: i64,
+        account: &NewAccount,
+    ) -> Result<(), StoreError> {
+        self.update_account_for_user_with_route_mapping_sync(user_id, id, account, false)
+            .await
+    }
+
+    async fn update_account_for_user_with_route_mapping_sync(
+        &self,
+        user_id: i64,
+        id: i64,
+        account: &NewAccount,
+        sync_model_route_mappings: bool,
+    ) -> Result<(), StoreError> {
         let encrypted_upstream_api_key = self.encryption.encrypt(&account.upstream_api_key);
         let models_json =
             serde_json::to_string(&account.models).unwrap_or_else(|_| "[]".to_owned());
         let headers_json =
             serde_json::to_string(&account.default_headers).unwrap_or_else(|_| "{}".to_owned());
-        let aliases_json =
-            serde_json::to_string(&account.model_aliases).unwrap_or_else(|_| "{}".to_owned());
+        let route_mappings_json = serde_json::to_string(&account.model_route_mappings)
+            .unwrap_or_else(|_| "{}".to_owned());
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(&format!(
-                    "UPDATE {ACCOUNTS_TABLE} SET name=?, provider=?, base_url=?, upstream_api_key=?, models=?, priority=?, timeout_secs=?, max_retries=?, retry_delay_ms=?, anthropic_version=?, default_headers=?, model_aliases=?, enabled=?, updated_at=datetime('now') WHERE user_id=? AND id=?"
+                    "UPDATE {ACCOUNTS_TABLE} SET name=?, provider=?, base_url=?, upstream_api_key=?, upstream_auth_scheme=?, models=?, priority=?, timeout_secs=?, max_retries=?, retry_delay_ms=?, anthropic_version=?, default_headers=?, model_route_mappings=?, enabled=?, updated_at=datetime('now') WHERE user_id=? AND id=?"
                 ))
                 .bind(&account.name).bind(&account.provider).bind(&account.base_url).bind(&encrypted_upstream_api_key)
+                .bind(&account.upstream_auth_scheme)
                 .bind(&models_json).bind(account.priority).bind(account.timeout_secs)
                 .bind(account.max_retries).bind(account.retry_delay_ms)
-                .bind(&account.anthropic_version).bind(&headers_json).bind(&aliases_json)
+                .bind(&account.anthropic_version).bind(&headers_json).bind(&route_mappings_json)
                 .bind(account.enabled).bind(user_id).bind(id)
                 .execute(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
             }
             DatabasePool::Postgres(pool) => {
                 sqlx::query(&format!(
-                    "UPDATE {ACCOUNTS_TABLE} SET name=$1, provider=$2, base_url=$3, upstream_api_key=$4, models=$5, priority=$6, timeout_secs=$7, max_retries=$8, retry_delay_ms=$9, anthropic_version=$10, default_headers=$11, model_aliases=$12, enabled=$13, updated_at=NOW() WHERE user_id=$14 AND id=$15"
+                    "UPDATE {ACCOUNTS_TABLE} SET name=$1, provider=$2, base_url=$3, upstream_api_key=$4, upstream_auth_scheme=$5, models=$6, priority=$7, timeout_secs=$8, max_retries=$9, retry_delay_ms=$10, anthropic_version=$11, default_headers=$12, model_route_mappings=$13, enabled=$14, updated_at=NOW() WHERE user_id=$15 AND id=$16"
                 ))
                 .bind(&account.name).bind(&account.provider).bind(&account.base_url).bind(&encrypted_upstream_api_key)
+                .bind(&account.upstream_auth_scheme)
                 .bind(&models_json).bind(account.priority).bind(account.timeout_secs)
                 .bind(account.max_retries).bind(account.retry_delay_ms)
-                .bind(&account.anthropic_version).bind(&headers_json).bind(&aliases_json)
+                .bind(&account.anthropic_version).bind(&headers_json).bind(&route_mappings_json)
                 .bind(account.enabled).bind(user_id).bind(id)
                 .execute(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
             }
+        }
+        if sync_model_route_mappings {
+            self.replace_model_route_mappings_for_account_from_map(
+                user_id,
+                id,
+                &account.name,
+                &account.model_route_mappings,
+            )
+            .await?;
+        } else {
+            self.update_model_route_mapping_account_name_for_account(user_id, id, &account.name)
+                .await?;
         }
         Ok(())
     }
@@ -474,6 +535,8 @@ impl Store {
     }
 
     pub async fn delete_account_for_user(&self, user_id: i64, id: i64) -> Result<(), StoreError> {
+        self.delete_model_route_mappings_for_account(user_id, id)
+            .await?;
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(&format!(
@@ -497,6 +560,278 @@ impl Store {
             }
         }
         Ok(())
+    }
+
+    // === Model Route Mapping CRUD ===
+
+    pub async fn list_model_route_mappings_for_user(
+        &self,
+        user_id: i64,
+    ) -> Result<Vec<ModelRouteMappingRow>, StoreError> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => sqlx::query_as::<_, ModelRouteMappingRow>(&format!(
+                "SELECT * FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = ? ORDER BY account_name ASC, client_model ASC"
+            ))
+            .bind(user_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| StoreError::Query(e.to_string())),
+            DatabasePool::Postgres(pool) => sqlx::query_as::<_, ModelRouteMappingRow>(&format!(
+                "SELECT * FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = $1 ORDER BY account_name ASC, client_model ASC"
+            ))
+            .bind(user_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| StoreError::Query(e.to_string())),
+        }
+    }
+
+    pub async fn list_enabled_model_route_mappings_for_user(
+        &self,
+        user_id: i64,
+    ) -> Result<Vec<ModelRouteMappingRow>, StoreError> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => sqlx::query_as::<_, ModelRouteMappingRow>(&format!(
+                "SELECT * FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = ? AND enabled = 1 ORDER BY account_name ASC, client_model ASC"
+            ))
+            .bind(user_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| StoreError::Query(e.to_string())),
+            DatabasePool::Postgres(pool) => sqlx::query_as::<_, ModelRouteMappingRow>(&format!(
+                "SELECT * FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = $1 AND enabled = TRUE ORDER BY account_name ASC, client_model ASC"
+            ))
+            .bind(user_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| StoreError::Query(e.to_string())),
+        }
+    }
+
+    pub async fn list_model_route_mappings_for_account(
+        &self,
+        user_id: i64,
+        account_id: i64,
+    ) -> Result<Vec<ModelRouteMappingRow>, StoreError> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => sqlx::query_as::<_, ModelRouteMappingRow>(&format!(
+                "SELECT * FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = ? AND account_id = ? ORDER BY client_model ASC"
+            ))
+            .bind(user_id)
+            .bind(account_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| StoreError::Query(e.to_string())),
+            DatabasePool::Postgres(pool) => sqlx::query_as::<_, ModelRouteMappingRow>(&format!(
+                "SELECT * FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = $1 AND account_id = $2 ORDER BY client_model ASC"
+            ))
+            .bind(user_id)
+            .bind(account_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| StoreError::Query(e.to_string())),
+        }
+    }
+
+    pub async fn upsert_model_route_mapping(
+        &self,
+        route_mapping: &NewModelRouteMapping,
+    ) -> Result<i64, StoreError> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let result = sqlx::query(&format!(
+                    "INSERT INTO {MODEL_ROUTE_MAPPINGS_TABLE} (user_id, account_id, account_name, client_model, upstream_model, enabled, notes) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, account_id, client_model) DO UPDATE SET account_name=excluded.account_name, upstream_model=excluded.upstream_model, enabled=excluded.enabled, notes=excluded.notes, version=version + 1, updated_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+                ))
+                .bind(route_mapping.user_id)
+                .bind(route_mapping.account_id)
+                .bind(&route_mapping.account_name)
+                .bind(&route_mapping.client_model)
+                .bind(&route_mapping.upstream_model)
+                .bind(route_mapping.enabled)
+                .bind(&route_mapping.notes)
+                .execute(pool)
+                .await
+                .map_err(|e| StoreError::Query(e.to_string()))?;
+                if result.last_insert_rowid() > 0 {
+                    Ok(result.last_insert_rowid())
+                } else {
+                    self.get_model_route_mapping_by_client_model(
+                        route_mapping.user_id,
+                        route_mapping.account_id,
+                        &route_mapping.client_model,
+                    )
+                    .await
+                    .map(|row| row.id)
+                }
+            }
+            DatabasePool::Postgres(pool) => {
+                let row = sqlx::query(&format!(
+                    "INSERT INTO {MODEL_ROUTE_MAPPINGS_TABLE} (user_id, account_id, account_name, client_model, upstream_model, enabled, notes) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT(user_id, account_id, client_model) DO UPDATE SET account_name=excluded.account_name, upstream_model=excluded.upstream_model, enabled=excluded.enabled, notes=excluded.notes, version={MODEL_ROUTE_MAPPINGS_TABLE}.version + 1, updated_at=NOW() RETURNING id"
+                ))
+                .bind(route_mapping.user_id)
+                .bind(route_mapping.account_id)
+                .bind(&route_mapping.account_name)
+                .bind(&route_mapping.client_model)
+                .bind(&route_mapping.upstream_model)
+                .bind(route_mapping.enabled)
+                .bind(&route_mapping.notes)
+                .fetch_one(pool)
+                .await
+                .map_err(|e| StoreError::Query(e.to_string()))?;
+                Ok(row.get::<i64, _>("id"))
+            }
+        }
+    }
+
+    pub async fn replace_model_route_mappings_for_account_from_map(
+        &self,
+        user_id: i64,
+        account_id: i64,
+        account_name: &str,
+        route_mappings: &std::collections::BTreeMap<String, String>,
+    ) -> Result<(), StoreError> {
+        self.delete_model_route_mappings_for_account(user_id, account_id)
+            .await?;
+        for (client_model, upstream_model) in route_mappings {
+            if client_model.trim().is_empty() || upstream_model.trim().is_empty() {
+                continue;
+            }
+            self.upsert_model_route_mapping(&NewModelRouteMapping {
+                user_id,
+                account_id,
+                account_name: account_name.to_owned(),
+                client_model: client_model.trim().to_owned(),
+                upstream_model: upstream_model.trim().to_owned(),
+                enabled: true,
+                notes: Some("synced from account model_route_mappings".to_owned()),
+            })
+            .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn delete_model_route_mapping_for_user(
+        &self,
+        user_id: i64,
+        id: i64,
+    ) -> Result<(), StoreError> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(&format!(
+                    "DELETE FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = ? AND id = ?"
+                ))
+                .bind(user_id)
+                .bind(id)
+                .execute(pool)
+                .await
+                .map_err(|e| StoreError::Query(e.to_string()))?;
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(&format!(
+                    "DELETE FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = $1 AND id = $2"
+                ))
+                .bind(user_id)
+                .bind(id)
+                .execute(pool)
+                .await
+                .map_err(|e| StoreError::Query(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn delete_model_route_mappings_for_account(
+        &self,
+        user_id: i64,
+        account_id: i64,
+    ) -> Result<(), StoreError> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(&format!(
+                    "DELETE FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = ? AND account_id = ?"
+                ))
+                .bind(user_id)
+                .bind(account_id)
+                .execute(pool)
+                .await
+                .map_err(|e| StoreError::Query(e.to_string()))?;
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(&format!(
+                    "DELETE FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = $1 AND account_id = $2"
+                ))
+                .bind(user_id)
+                .bind(account_id)
+                .execute(pool)
+                .await
+                .map_err(|e| StoreError::Query(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn update_model_route_mapping_account_name_for_account(
+        &self,
+        user_id: i64,
+        account_id: i64,
+        account_name: &str,
+    ) -> Result<(), StoreError> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(&format!(
+                    "UPDATE {MODEL_ROUTE_MAPPINGS_TABLE} SET account_name = ?, version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE user_id = ? AND account_id = ? AND account_name <> ?"
+                ))
+                .bind(account_name)
+                .bind(user_id)
+                .bind(account_id)
+                .bind(account_name)
+                .execute(pool)
+                .await
+                .map_err(|e| StoreError::Query(e.to_string()))?;
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(&format!(
+                    "UPDATE {MODEL_ROUTE_MAPPINGS_TABLE} SET account_name = $1, version = version + 1, updated_at = NOW() WHERE user_id = $2 AND account_id = $3 AND account_name <> $1"
+                ))
+                .bind(account_name)
+                .bind(user_id)
+                .bind(account_id)
+                .execute(pool)
+                .await
+                .map_err(|e| StoreError::Query(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn get_model_route_mapping_by_client_model(
+        &self,
+        user_id: i64,
+        account_id: i64,
+        client_model: &str,
+    ) -> Result<ModelRouteMappingRow, StoreError> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => sqlx::query_as::<_, ModelRouteMappingRow>(&format!(
+                "SELECT * FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = ? AND account_id = ? AND client_model = ?"
+            ))
+            .bind(user_id)
+            .bind(account_id)
+            .bind(client_model)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| StoreError::Query(e.to_string()))?
+            .ok_or_else(|| StoreError::NotFound("model route mapping not found".to_owned())),
+            DatabasePool::Postgres(pool) => sqlx::query_as::<_, ModelRouteMappingRow>(&format!(
+                "SELECT * FROM {MODEL_ROUTE_MAPPINGS_TABLE} WHERE user_id = $1 AND account_id = $2 AND client_model = $3"
+            ))
+            .bind(user_id)
+            .bind(account_id)
+            .bind(client_model)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| StoreError::Query(e.to_string()))?
+            .ok_or_else(|| StoreError::NotFound("model route mapping not found".to_owned())),
+        }
     }
 
     pub async fn toggle_account(&self, id: i64, enabled: bool) -> Result<(), StoreError> {
@@ -923,6 +1258,7 @@ mod tests {
         .unwrap();
 
         assert!(tables.contains(&"local_router_upstream_accounts".to_owned()));
+        assert!(tables.contains(&"local_router_model_route_mappings".to_owned()));
         assert!(tables.contains(&"local_router_client_api_keys".to_owned()));
         assert!(!tables.contains(&"local_router_accounts".to_owned()));
         assert!(!tables.contains(&"local_router_api_keys".to_owned()));
@@ -1021,6 +1357,7 @@ mod tests {
             provider: "openai".to_owned(),
             base_url: "https://api.openai.example/v1".to_owned(),
             upstream_api_key: "sk-test".to_owned(),
+            upstream_auth_scheme: Some("bearer".to_owned()),
             models: vec!["gpt-5".to_owned()],
             priority: 10,
             timeout_secs: 120,
@@ -1028,10 +1365,19 @@ mod tests {
             retry_delay_ms: 500,
             anthropic_version: None,
             default_headers: BTreeMap::new(),
-            model_aliases: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
             enabled: true,
         };
         store.insert_account(&account).await.unwrap();
+        let stored_account = store
+            .get_account_by_name("openai-main")
+            .await
+            .unwrap()
+            .expect("stored account");
+        assert_eq!(
+            stored_account.upstream_auth_scheme.as_deref(),
+            Some("bearer")
+        );
 
         store
             .insert_invocation(&NewInvocation {
@@ -1105,6 +1451,7 @@ mod tests {
                     provider: "openai".to_owned(),
                     base_url: format!("https://user{user_id}.example/v1"),
                     upstream_api_key: "sk-test".to_owned(),
+                    upstream_auth_scheme: None,
                     models: vec![format!("user{user_id}-model")],
                     priority: 10,
                     timeout_secs: 120,
@@ -1112,7 +1459,7 @@ mod tests {
                     retry_delay_ms: 500,
                     anthropic_version: None,
                     default_headers: BTreeMap::new(),
-                    model_aliases: BTreeMap::new(),
+                    model_route_mappings: BTreeMap::new(),
                     enabled: true,
                 })
                 .await
@@ -1201,6 +1548,341 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn model_route_mappings_are_first_class_user_isolated_account_data() {
+        let (url, path) = temp_sqlite_url("model-route-mappings");
+        let store = Store::new(&url).await.unwrap();
+        store.run_migrations().await.unwrap();
+
+        let mut route_mappings = BTreeMap::new();
+        route_mappings.insert("gpt-5.5".to_owned(), "gemini-2.5-pro".to_owned());
+        route_mappings.insert("claude-4".to_owned(), "claude-sonnet-4-20250514".to_owned());
+        let account_id = store
+            .insert_account(&NewAccount {
+                user_id: 7,
+                name: "mapped-account".to_owned(),
+                provider: "google".to_owned(),
+                base_url: "https://generativelanguage.googleapis.com".to_owned(),
+                upstream_api_key: "sk-test".to_owned(),
+                upstream_auth_scheme: None,
+                models: vec!["gemini-*".to_owned(), "claude-*".to_owned()],
+                priority: 10,
+                timeout_secs: 120,
+                max_retries: 0,
+                retry_delay_ms: 500,
+                anthropic_version: None,
+                default_headers: BTreeMap::new(),
+                model_route_mappings: route_mappings,
+                enabled: true,
+            })
+            .await
+            .unwrap();
+
+        let user_route_mappings = store.list_model_route_mappings_for_user(7).await.unwrap();
+        assert_eq!(user_route_mappings.len(), 2);
+        assert_eq!(user_route_mappings[0].user_id, 7);
+        assert_eq!(user_route_mappings[0].account_id, account_id);
+        assert_eq!(user_route_mappings[0].account_name, "mapped-account");
+        assert!(user_route_mappings.iter().any(|route_mapping| {
+            route_mapping.client_model == "gpt-5.5"
+                && route_mapping.upstream_model == "gemini-2.5-pro"
+        }));
+        assert!(store
+            .list_model_route_mappings_for_user(8)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let mut replacement = BTreeMap::new();
+        replacement.insert("gpt-5.5".to_owned(), "gemini-2.5-flash".to_owned());
+        store
+            .update_account_for_user(
+                7,
+                account_id,
+                &NewAccount {
+                    user_id: 7,
+                    name: "mapped-account".to_owned(),
+                    provider: "google".to_owned(),
+                    base_url: "https://generativelanguage.googleapis.com".to_owned(),
+                    upstream_api_key: "sk-test".to_owned(),
+                    upstream_auth_scheme: None,
+                    models: vec!["gemini-*".to_owned()],
+                    priority: 10,
+                    timeout_secs: 120,
+                    max_retries: 0,
+                    retry_delay_ms: 500,
+                    anthropic_version: None,
+                    default_headers: BTreeMap::new(),
+                    model_route_mappings: replacement,
+                    enabled: true,
+                },
+            )
+            .await
+            .unwrap();
+
+        let account_route_mappings = store
+            .list_model_route_mappings_for_account(7, account_id)
+            .await
+            .unwrap();
+        assert_eq!(account_route_mappings.len(), 1);
+        assert_eq!(account_route_mappings[0].client_model, "gpt-5.5");
+        assert_eq!(account_route_mappings[0].upstream_model, "gemini-2.5-flash");
+
+        store.delete_account_for_user(7, account_id).await.unwrap();
+        assert!(store
+            .list_model_route_mappings_for_user(7)
+            .await
+            .unwrap()
+            .is_empty());
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn account_update_can_preserve_first_class_model_route_mappings() {
+        let (url, path) = temp_sqlite_url("model-route-mapping-preserve");
+        let store = Store::new(&url).await.unwrap();
+        store.run_migrations().await.unwrap();
+
+        let account = NewAccount {
+            user_id: 11,
+            name: "runtime-route_mapping-account".to_owned(),
+            provider: "google".to_owned(),
+            base_url: "https://generativelanguage.googleapis.com".to_owned(),
+            upstream_api_key: "sk-test".to_owned(),
+            upstream_auth_scheme: None,
+            models: vec!["gemini-*".to_owned()],
+            priority: 10,
+            timeout_secs: 120,
+            max_retries: 0,
+            retry_delay_ms: 500,
+            anthropic_version: None,
+            default_headers: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
+            enabled: true,
+        };
+        let account_id = store.insert_account(&account).await.unwrap();
+        store
+            .upsert_model_route_mapping(&NewModelRouteMapping {
+                user_id: 11,
+                account_id,
+                account_name: "runtime-route_mapping-account".to_owned(),
+                client_model: "gpt-5.5".to_owned(),
+                upstream_model: "gemini-2.5-pro".to_owned(),
+                enabled: true,
+                notes: Some("runtime managed".to_owned()),
+            })
+            .await
+            .unwrap();
+
+        let mut updated = account;
+        updated.priority = 20;
+        store
+            .update_account_for_user_without_route_mapping_sync(11, account_id, &updated)
+            .await
+            .unwrap();
+
+        let route_mappings = store
+            .list_model_route_mappings_for_account(11, account_id)
+            .await
+            .unwrap();
+        assert_eq!(route_mappings.len(), 1);
+        assert_eq!(route_mappings[0].client_model, "gpt-5.5");
+        assert_eq!(route_mappings[0].upstream_model, "gemini-2.5-pro");
+        assert_eq!(route_mappings[0].notes.as_deref(), Some("runtime managed"));
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn account_rename_preserves_route_mappings_and_refreshes_account_name_snapshot() {
+        let (url, path) = temp_sqlite_url("model-route-mapping-rename");
+        let store = Store::new(&url).await.unwrap();
+        store.run_migrations().await.unwrap();
+
+        let account = NewAccount {
+            user_id: 12,
+            name: "old-name".to_owned(),
+            provider: "google".to_owned(),
+            base_url: "https://generativelanguage.googleapis.com".to_owned(),
+            upstream_api_key: "sk-test".to_owned(),
+            upstream_auth_scheme: None,
+            models: vec!["gemini-*".to_owned()],
+            priority: 10,
+            timeout_secs: 120,
+            max_retries: 0,
+            retry_delay_ms: 500,
+            anthropic_version: None,
+            default_headers: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
+            enabled: true,
+        };
+        let account_id = store.insert_account(&account).await.unwrap();
+        store
+            .upsert_model_route_mapping(&NewModelRouteMapping {
+                user_id: 12,
+                account_id,
+                account_name: "old-name".to_owned(),
+                client_model: "gpt-5.5".to_owned(),
+                upstream_model: "gemini-2.5-pro".to_owned(),
+                enabled: true,
+                notes: None,
+            })
+            .await
+            .unwrap();
+
+        let mut renamed = account;
+        renamed.name = "new-name".to_owned();
+        store
+            .update_account_for_user_without_route_mapping_sync(12, account_id, &renamed)
+            .await
+            .unwrap();
+
+        let route_mappings = store
+            .list_model_route_mappings_for_account(12, account_id)
+            .await
+            .unwrap();
+        assert_eq!(route_mappings.len(), 1);
+        assert_eq!(route_mappings[0].account_name, "new-name");
+        assert_eq!(route_mappings[0].client_model, "gpt-5.5");
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn sqlite_model_route_mapping_upsert_returns_existing_id_on_conflict_update() {
+        let (url, path) = temp_sqlite_url("model-route-mapping-upsert-id");
+        let store = Store::new(&url).await.unwrap();
+        store.run_migrations().await.unwrap();
+
+        let account_id = store
+            .insert_account(&NewAccount {
+                user_id: 13,
+                name: "mapped-account".to_owned(),
+                provider: "google".to_owned(),
+                base_url: "https://generativelanguage.googleapis.com".to_owned(),
+                upstream_api_key: "sk-test".to_owned(),
+                upstream_auth_scheme: None,
+                models: vec!["gemini-*".to_owned()],
+                priority: 10,
+                timeout_secs: 120,
+                max_retries: 0,
+                retry_delay_ms: 500,
+                anthropic_version: None,
+                default_headers: BTreeMap::new(),
+                model_route_mappings: BTreeMap::new(),
+                enabled: true,
+            })
+            .await
+            .unwrap();
+
+        let first_id = store
+            .upsert_model_route_mapping(&NewModelRouteMapping {
+                user_id: 13,
+                account_id,
+                account_name: "mapped-account".to_owned(),
+                client_model: "gpt-5.5".to_owned(),
+                upstream_model: "gemini-2.5-pro".to_owned(),
+                enabled: true,
+                notes: None,
+            })
+            .await
+            .unwrap();
+        let second_id = store
+            .upsert_model_route_mapping(&NewModelRouteMapping {
+                user_id: 13,
+                account_id,
+                account_name: "mapped-account".to_owned(),
+                client_model: "claude-4".to_owned(),
+                upstream_model: "gemini-2.5-flash".to_owned(),
+                enabled: true,
+                notes: None,
+            })
+            .await
+            .unwrap();
+        let updated_first_id = store
+            .upsert_model_route_mapping(&NewModelRouteMapping {
+                user_id: 13,
+                account_id,
+                account_name: "mapped-account".to_owned(),
+                client_model: "gpt-5.5".to_owned(),
+                upstream_model: "gemini-2.5-flash".to_owned(),
+                enabled: true,
+                notes: Some("updated".to_owned()),
+            })
+            .await
+            .unwrap();
+
+        assert_ne!(first_id, second_id);
+        assert_eq!(updated_first_id, first_id);
+        let route_mappings = store
+            .list_model_route_mappings_for_account(13, account_id)
+            .await
+            .unwrap();
+        assert!(route_mappings.iter().any(|route_mapping| {
+            route_mapping.id == first_id
+                && route_mapping.client_model == "gpt-5.5"
+                && route_mapping.upstream_model == "gemini-2.5-flash"
+        }));
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn model_route_mapping_foreign_key_enforces_user_scoped_account_ownership() {
+        let (url, path) = temp_sqlite_url("model-route-mapping-account-owner");
+        let store = Store::new(&url).await.unwrap();
+        store.run_migrations().await.unwrap();
+
+        let account_id = store
+            .insert_account(&NewAccount {
+                user_id: 20,
+                name: "owner-account".to_owned(),
+                provider: "google".to_owned(),
+                base_url: "https://generativelanguage.googleapis.com".to_owned(),
+                upstream_api_key: "sk-test".to_owned(),
+                upstream_auth_scheme: None,
+                models: vec!["gemini-*".to_owned()],
+                priority: 10,
+                timeout_secs: 120,
+                max_retries: 0,
+                retry_delay_ms: 500,
+                anthropic_version: None,
+                default_headers: BTreeMap::new(),
+                model_route_mappings: BTreeMap::new(),
+                enabled: true,
+            })
+            .await
+            .unwrap();
+
+        let error = store
+            .upsert_model_route_mapping(&NewModelRouteMapping {
+                user_id: 21,
+                account_id,
+                account_name: "owner-account".to_owned(),
+                client_model: "gpt-5.5".to_owned(),
+                upstream_model: "gemini-2.5-pro".to_owned(),
+                enabled: true,
+                notes: None,
+            })
+            .await
+            .expect_err("cross-user account route_mapping must be rejected");
+
+        assert!(error.to_string().contains("FOREIGN KEY"));
+        assert!(store
+            .list_model_route_mappings_for_user(21)
+            .await
+            .unwrap()
+            .is_empty());
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn default_store_methods_use_user_id_zero() {
         let (url, path) = temp_sqlite_url("default-user-id");
         let store = Store::new(&url).await.unwrap();
@@ -1213,6 +1895,7 @@ mod tests {
                 provider: "openai".to_owned(),
                 base_url: "https://default.example/v1".to_owned(),
                 upstream_api_key: "sk-test".to_owned(),
+                upstream_auth_scheme: None,
                 models: vec!["default-model".to_owned()],
                 priority: 10,
                 timeout_secs: 120,
@@ -1220,7 +1903,7 @@ mod tests {
                 retry_delay_ms: 500,
                 anthropic_version: None,
                 default_headers: BTreeMap::new(),
-                model_aliases: BTreeMap::new(),
+                model_route_mappings: BTreeMap::new(),
                 enabled: true,
             })
             .await
@@ -1232,6 +1915,7 @@ mod tests {
                 provider: "openai".to_owned(),
                 base_url: "https://other.example/v1".to_owned(),
                 upstream_api_key: "sk-test".to_owned(),
+                upstream_auth_scheme: None,
                 models: vec!["other-model".to_owned()],
                 priority: 10,
                 timeout_secs: 120,
@@ -1239,7 +1923,7 @@ mod tests {
                 retry_delay_ms: 500,
                 anthropic_version: None,
                 default_headers: BTreeMap::new(),
-                model_aliases: BTreeMap::new(),
+                model_route_mappings: BTreeMap::new(),
                 enabled: true,
             })
             .await

@@ -12,6 +12,7 @@ use serde_json::json;
 
 use crate::router::AppState;
 use crate::streaming;
+use crate::upstream_auth::auth_from_scheme;
 use sdkwork_lr_core::{Account, InterceptorError, Invocation, Protocol, ProviderKind};
 use sdkwork_lr_plugin::{
     ApiSurface, CompatibilityDecision, ModelCompatibilityResolver, PluginPolicy, TransformContext,
@@ -35,6 +36,11 @@ async fn pool_for_user_id(
         .list_accounts_for_user(user_id)
         .await
         .map_err(|error| error.to_string())?;
+    let enabled_route_mappings = state
+        .store
+        .list_enabled_model_route_mappings_for_user(user_id)
+        .await
+        .map_err(|error| error.to_string())?;
     let accounts: Vec<Account> = rows
         .into_iter()
         .map(|row| {
@@ -42,13 +48,24 @@ async fn pool_for_user_id(
             let models = serde_json::from_str(&row.models).unwrap_or_default();
             let default_headers =
                 serde_json::from_str(&row.default_headers.unwrap_or_default()).unwrap_or_default();
-            let model_aliases =
-                serde_json::from_str(&row.model_aliases.unwrap_or_default()).unwrap_or_default();
+            let mut model_route_mappings: std::collections::BTreeMap<String, String> =
+                serde_json::from_str(&row.model_route_mappings.unwrap_or_default())
+                    .unwrap_or_default();
+            for route_mapping in enabled_route_mappings
+                .iter()
+                .filter(|route_mapping| route_mapping.account_id == row.id)
+            {
+                model_route_mappings.insert(
+                    route_mapping.client_model.clone(),
+                    route_mapping.upstream_model.clone(),
+                );
+            }
             Account {
                 name: row.name,
                 provider,
                 base_url: row.base_url,
                 upstream_api_key: row.upstream_api_key,
+                upstream_auth_scheme: row.upstream_auth_scheme,
                 models,
                 priority: row.priority as u32,
                 timeout: std::time::Duration::from_secs(row.timeout_secs as u64),
@@ -57,7 +74,7 @@ async fn pool_for_user_id(
                 anthropic_version: row.anthropic_version,
                 default_headers,
                 enabled: row.enabled,
-                model_aliases,
+                model_route_mappings,
             }
         })
         .collect();
@@ -305,6 +322,10 @@ async fn handle_provider_passthrough(
         }
 
         let upstream_protocol = account.provider.to_protocol();
+        let upstream_model = model
+            .as_deref()
+            .and_then(|requested_model| resolve_upstream_model(account.as_ref(), requested_model))
+            .map(str::to_owned);
         let transform_plan = build_transform_plan(
             &state,
             client_protocol,
@@ -312,6 +333,7 @@ async fn handle_provider_passthrough(
             &path,
             client_base_path,
             model.as_deref(),
+            upstream_model.as_deref(),
             is_streaming,
             &headers,
         );
@@ -333,7 +355,7 @@ async fn handle_provider_passthrough(
                 &path,
                 client_base_path,
                 upstream_protocol,
-                model.as_deref(),
+                upstream_model.as_deref(),
                 is_streaming,
             )
         });
@@ -501,6 +523,7 @@ async fn handle_provider_passthrough(
                         needs_transform,
                         is_streaming,
                         model.as_deref(),
+                        upstream_model.as_deref(),
                         &request_id,
                         &state,
                         user_id,
@@ -553,12 +576,19 @@ async fn handle_upstream_response(
     needs_transform: bool,
     is_streaming: bool,
     model: Option<&str>,
+    upstream_model: Option<&str>,
     request_id: &str,
     state: &AppState,
     user_id: i64,
     invocation: &mut Invocation,
 ) -> Response {
     let transform_context = &transform_plan.context;
+    let response_model = model
+        .or(transform_context.model.as_deref())
+        .unwrap_or("unknown");
+    let stream_model = upstream_model
+        .or(transform_context.upstream_model.as_deref())
+        .unwrap_or(response_model);
     let status = hyper_response.status();
     let (parts, incoming_body) = hyper_response.into_parts();
 
@@ -571,7 +601,7 @@ async fn handle_upstream_response(
         };
 
         let final_body = if needs_transform {
-            match transform_response(&resp_bytes, transform_context, model.unwrap_or("unknown")) {
+            match transform_response(&resp_bytes, transform_context, response_model) {
                 Ok(transformed) => serde_json_to_bytes(&transformed),
                 Err(_) => resp_bytes,
             }
@@ -592,7 +622,7 @@ async fn handle_upstream_response(
         return response;
     }
 
-    if is_streaming && needs_transform && client_protocol != upstream_protocol {
+    if is_streaming && needs_transform {
         let hyper_resp = hyper::Response::from_parts(parts, incoming_body);
         invocation.set_response(status.as_u16(), None);
         let completion_state = state.clone();
@@ -602,7 +632,9 @@ async fn handle_upstream_response(
             hyper_resp,
             upstream_protocol,
             client_protocol,
-            model.unwrap_or("unknown").to_owned(),
+            transform_context.target,
+            transform_context.source,
+            response_model.to_owned(),
             request_id.to_owned(),
             move |usage| {
                 Box::pin(async move {
@@ -626,15 +658,6 @@ async fn handle_upstream_response(
         return response;
     }
 
-    if is_streaming && needs_transform {
-        tracing::warn!(
-            request_id = %request_id,
-            source = %transform_context.source,
-            target = %transform_context.target,
-            "stream transform for this API surface pair is not implemented; returning upstream stream unchanged"
-        );
-    }
-
     if is_streaming {
         invocation.set_response(status.as_u16(), None);
         let completion_state = state.clone();
@@ -644,7 +667,9 @@ async fn handle_upstream_response(
             hyper::Response::from_parts(parts, incoming_body),
             upstream_protocol,
             upstream_protocol,
-            model.unwrap_or("unknown").to_owned(),
+            transform_context.target,
+            transform_context.target,
+            stream_model.to_owned(),
             request_id.to_owned(),
             move |usage| {
                 Box::pin(async move {
@@ -682,7 +707,7 @@ async fn handle_upstream_response(
     };
 
     let final_body = if needs_transform {
-        match transform_response(&resp_bytes, transform_context, model.unwrap_or("unknown")) {
+        match transform_response(&resp_bytes, transform_context, response_model) {
             Ok(transformed) => {
                 let parsed = transformed;
                 invocation.extract_usage_from_response(&parsed, client_protocol);
@@ -840,7 +865,8 @@ fn build_forward_body(
     if matches!(policy, PluginPolicy::Passthrough) {
         return match serde_json::from_slice::<serde_json::Value>(body) {
             Ok(mut parsed) => {
-                apply_model_alias(&mut parsed, account);
+                apply_model_route_mapping(&mut parsed, account);
+                ensure_target_model_field(&mut parsed, context);
                 Ok(serde_json_to_bytes(&parsed))
             }
             Err(e) => {
@@ -853,7 +879,8 @@ fn build_forward_body(
     if needs_transform {
         match transform_request(body, context) {
             Ok(mut transformed) => {
-                apply_model_alias(&mut transformed, account);
+                apply_model_route_mapping(&mut transformed, account);
+                ensure_target_model_field(&mut transformed, context);
                 Ok(serde_json_to_bytes(&transformed))
             }
             Err(e) => {
@@ -867,7 +894,8 @@ fn build_forward_body(
     } else {
         match serde_json::from_slice::<serde_json::Value>(body) {
             Ok(mut parsed) => {
-                apply_model_alias(&mut parsed, account);
+                apply_model_route_mapping(&mut parsed, account);
+                ensure_target_model_field(&mut parsed, context);
                 Ok(serde_json_to_bytes(&parsed))
             }
             Err(e) => {
@@ -1002,6 +1030,12 @@ fn build_auth_for_provider(account: &Account) -> Option<AuthInjection> {
     if account.upstream_api_key.is_empty() {
         return None;
     }
+    if let Some(auth) = auth_from_scheme(
+        account.upstream_auth_scheme.as_deref(),
+        &account.upstream_api_key,
+    ) {
+        return Some(auth);
+    }
     match account.provider {
         ProviderKind::Openai | ProviderKind::Custom(_) => {
             Some(AuthInjection::Bearer(account.upstream_api_key.clone()))
@@ -1040,7 +1074,11 @@ fn extract_model(body: &[u8], path: &str, protocol: Protocol) -> Option<String> 
     if protocol == Protocol::Google {
         if let Some(captures) = GEMINI_MODEL_REGEX.captures(path) {
             if let Some(m) = captures.get(1) {
-                return Some(m.as_str().to_owned());
+                return Some(
+                    urlencoding::decode(m.as_str())
+                        .map(|model| model.into_owned())
+                        .unwrap_or_else(|_| m.as_str().to_owned()),
+                );
             }
         }
     }
@@ -1088,7 +1126,8 @@ fn build_transform_plan(
     upstream_protocol: Protocol,
     path: &str,
     client_base_path: &str,
-    model: Option<&str>,
+    requested_model: Option<&str>,
+    upstream_model: Option<&str>,
     is_streaming: bool,
     headers: &HeaderMap,
 ) -> TransformPlan {
@@ -1097,7 +1136,8 @@ fn build_transform_plan(
     let upstream_surface =
         upstream_surface_for_request(client_protocol, upstream_protocol, request_surface);
     let client_api_code = resolve_client_api_code(client_protocol, request_surface, headers);
-    let decision = model.and_then(|model_id| {
+    let decision_model = upstream_model.or(requested_model);
+    let decision = decision_model.and_then(|model_id| {
         state.model_catalog.as_ref().map(|catalog| {
             let resolver = ModelCompatibilityResolver::new(catalog);
             resolver.decide(
@@ -1145,7 +1185,8 @@ fn build_transform_plan(
         target_protocol: upstream_protocol,
         client_path: path.to_owned(),
         client_base_path: client_base_path.to_owned(),
-        model: model.map(str::to_owned),
+        upstream_model: upstream_model.map(str::to_owned),
+        model: requested_model.map(str::to_owned),
         is_streaming,
     };
 
@@ -1276,11 +1317,46 @@ fn map_upstream_path(state: &AppState, context: &TransformContext) -> Result<Str
         .transform_registry
         .resolve(context.source, context.target)
     else {
-        return Ok(sdkwork_lr_plugin::map_standard_upstream_path(context));
+        return Ok(map_upstream_path_with_model_route_mapping(context));
     };
     plugin
         .map_upstream_path(context)
+        .map(|path| rewrite_gemini_passthrough_model_path(path, context))
         .map_err(|error| error.to_string())
+}
+
+fn map_upstream_path_with_model_route_mapping(context: &TransformContext) -> String {
+    rewrite_gemini_passthrough_model_path(
+        sdkwork_lr_plugin::map_standard_upstream_path(context),
+        context,
+    )
+}
+
+fn rewrite_gemini_passthrough_model_path(path: String, context: &TransformContext) -> String {
+    if context.target != ApiSurface::GeminiGenerateContent
+        || context.upstream_model == context.model
+        || context.source != ApiSurface::GeminiGenerateContent
+    {
+        return path;
+    }
+
+    let Some(requested_model) = context.model.as_deref() else {
+        return path;
+    };
+    let Some(upstream_model) = context.upstream_model.as_deref() else {
+        return path;
+    };
+
+    let encoded_requested = urlencoding::encode(requested_model).into_owned();
+    if path.contains(requested_model) {
+        return path.replacen(requested_model, upstream_model, 1);
+    }
+    if path.contains(&encoded_requested) {
+        let encoded_upstream = urlencoding::encode(upstream_model);
+        return path.replacen(&encoded_requested, encoded_upstream.as_ref(), 1);
+    }
+
+    path
 }
 
 fn append_query(path: String, query: Option<&str>) -> String {
@@ -1362,15 +1438,46 @@ fn transform_response(
     sdkwork_lr_transform::transform_response_body_with_context(&parsed, &context)
 }
 
-fn apply_model_alias(body: &mut serde_json::Value, account: &Account) {
-    if account.model_aliases.is_empty() {
+fn apply_model_route_mapping(body: &mut serde_json::Value, account: &Account) {
+    if account.model_route_mappings.is_empty() {
         return;
     }
     if let Some(model) = body.get("model").and_then(|v| v.as_str()) {
-        if let Some(alias) = account.model_aliases.get(model) {
-            body["model"] = serde_json::Value::String(alias.clone());
+        if let Some(upstream_model) = resolve_upstream_model(account, model) {
+            if upstream_model != model {
+                body["model"] = serde_json::Value::String(upstream_model.to_owned());
+            }
         }
     }
+}
+
+fn ensure_target_model_field(body: &mut serde_json::Value, context: &TransformContext) {
+    if !matches!(
+        context.target,
+        ApiSurface::OpenAiChatCompletions
+            | ApiSurface::OpenAiResponses
+            | ApiSurface::AnthropicMessages
+    ) || body.get("model").is_some()
+    {
+        return;
+    }
+
+    if let Some(model) = context
+        .upstream_model
+        .as_deref()
+        .or(context.model.as_deref())
+        .filter(|model| !model.trim().is_empty())
+    {
+        body["model"] = serde_json::Value::String(model.to_owned());
+    }
+}
+
+fn resolve_upstream_model<'a>(account: &'a Account, requested_model: &'a str) -> Option<&'a str> {
+    account
+        .model_route_mappings
+        .get(requested_model)
+        .map(String::as_str)
+        .or(Some(requested_model))
 }
 
 fn should_fallback(status: axum::http::StatusCode) -> bool {
@@ -1592,7 +1699,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_preflight_rejects_streaming_when_surface_plugin_has_no_stream_transform() {
+    fn plugin_preflight_allows_openai_responses_chat_streaming_transforms() {
         let registry = sdkwork_lr_transform::plugins::built_in_plugin_registry();
         let mut context = context(
             ApiSurface::OpenAiResponses,
@@ -1607,16 +1714,82 @@ mod tests {
             plugin_id: Some("OPENAI_RESPONSES_TO_OPENAI_CHAT_COMPLETIONS_API".to_owned()),
         };
 
-        let error = preflight_transform_plan(&registry, &plan)
-            .expect_err("streaming surface plugin without stream support must be blocked");
+        preflight_transform_plan(&registry, &plan)
+            .expect("Codex Responses streaming to OpenAI Chat Completions must be supported");
+    }
 
-        assert_eq!(error.status, StatusCode::NOT_IMPLEMENTED);
-        assert!(error
-            .message
-            .contains("does not support streaming transforms"));
-        assert!(error
-            .message
-            .contains("OPENAI_RESPONSES_TO_OPENAI_CHAT_COMPLETIONS_API"));
+    #[test]
+    fn plugin_preflight_allows_codex_responses_streaming_to_claude_messages() {
+        let registry = sdkwork_lr_transform::plugins::built_in_plugin_registry();
+        let mut context = context(ApiSurface::OpenAiResponses, ApiSurface::AnthropicMessages);
+        context.is_streaming = true;
+        let plan = TransformPlan {
+            context,
+            policy: PluginPolicy::Strict,
+            client_api_code: "codex".to_owned(),
+            decision: Some(compatibility_decision()),
+            plugin_id: Some("OPENAI_RESPONSES_TO_ANTHROPIC_MESSAGES_API".to_owned()),
+        };
+
+        preflight_transform_plan(&registry, &plan)
+            .expect("Codex Responses streaming to Claude Messages must be supported");
+    }
+
+    #[test]
+    fn plugin_preflight_allows_codex_responses_streaming_to_gemini_generate_content() {
+        let registry = sdkwork_lr_transform::plugins::built_in_plugin_registry();
+        let mut context = context(
+            ApiSurface::OpenAiResponses,
+            ApiSurface::GeminiGenerateContent,
+        );
+        context.is_streaming = true;
+        let plan = TransformPlan {
+            context,
+            policy: PluginPolicy::Strict,
+            client_api_code: "codex".to_owned(),
+            decision: None,
+            plugin_id: Some("OPENAI_RESPONSES_TO_GEMINI_GENERATE_CONTENT_API".to_owned()),
+        };
+
+        preflight_transform_plan(&registry, &plan)
+            .expect("Codex Responses streaming to Gemini GenerateContent must be supported");
+    }
+
+    #[test]
+    fn plugin_preflight_allows_claude_messages_streaming_to_openai_responses() {
+        let registry = sdkwork_lr_transform::plugins::built_in_plugin_registry();
+        let mut context = context(ApiSurface::AnthropicMessages, ApiSurface::OpenAiResponses);
+        context.is_streaming = true;
+        let plan = TransformPlan {
+            context,
+            policy: PluginPolicy::Strict,
+            client_api_code: "claude_code".to_owned(),
+            decision: None,
+            plugin_id: Some("ANTHROPIC_MESSAGES_TO_OPENAI_RESPONSES_API".to_owned()),
+        };
+
+        preflight_transform_plan(&registry, &plan)
+            .expect("Claude Code streaming to OpenAI Responses must be supported");
+    }
+
+    #[test]
+    fn plugin_preflight_allows_claude_messages_streaming_to_gemini_generate_content() {
+        let registry = sdkwork_lr_transform::plugins::built_in_plugin_registry();
+        let mut context = context(
+            ApiSurface::AnthropicMessages,
+            ApiSurface::GeminiGenerateContent,
+        );
+        context.is_streaming = true;
+        let plan = TransformPlan {
+            context,
+            policy: PluginPolicy::Strict,
+            client_api_code: "claude_code".to_owned(),
+            decision: None,
+            plugin_id: Some("ANTHROPIC_MESSAGES_TO_GEMINI_GENERATE_CONTENT_API".to_owned()),
+        };
+
+        preflight_transform_plan(&registry, &plan)
+            .expect("Claude Code streaming to Gemini GenerateContent must be supported");
     }
 
     #[test]
@@ -1661,6 +1834,7 @@ mod tests {
             "/v1/responses",
             "/v1",
             Some("gpt-compatible"),
+            Some("gpt-compatible"),
             false,
             &headers,
         );
@@ -1689,6 +1863,7 @@ mod tests {
             "/v1/responses",
             "/v1",
             Some("gpt-5"),
+            Some("gpt-5"),
             false,
             &headers,
         );
@@ -1710,6 +1885,7 @@ mod tests {
             "/v1/batches",
             "/v1",
             None,
+            None,
             false,
             &headers,
         );
@@ -1719,6 +1895,667 @@ mod tests {
         assert_eq!(plan.plugin_id, None);
         preflight_transform_plan(&state.transform_registry, &plan)
             .expect("same-protocol Batch API passthrough must not use reserved execution plugin");
+    }
+
+    #[tokio::test]
+    async fn codex_responses_route_to_openai_chat_upstream_supports_streaming_transform() {
+        let catalog = catalog_with_vendor_model(
+            vendor(
+                "custom-openai-compatible",
+                "Custom OpenAI Compatible",
+                &[("codex", "unsupported", &[])],
+                &["openai_compatible"],
+            ),
+            model(
+                "custom-chat-model",
+                "custom-openai-compatible",
+                "openai_compatible",
+            ),
+        );
+        let state = app_state_with_catalog(catalog).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Openai,
+            Protocol::Openai,
+            "/v1/responses",
+            "/v1",
+            Some("custom-chat-model"),
+            Some("custom-chat-model"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::OpenAiResponses);
+        assert_eq!(plan.context.target, ApiSurface::OpenAiChatCompletions);
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("OPENAI_RESPONSES_TO_OPENAI_CHAT_COMPLETIONS_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Codex Responses streaming to OpenAI-compatible Chat upstream must work");
+        assert_eq!(
+            map_upstream_path(&state, &plan.context).expect("plugin path"),
+            "/chat/completions"
+        );
+    }
+
+    #[tokio::test]
+    async fn codex_responses_route_to_anthropic_upstream_selects_responses_to_messages_plugin() {
+        let state = app_state_with_catalog(empty_catalog()).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Openai,
+            Protocol::Anthropic,
+            "/v1/responses",
+            "/v1",
+            Some("claude-sonnet-4-20250514"),
+            Some("claude-sonnet-4-20250514"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::OpenAiResponses);
+        assert_eq!(plan.context.target, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.source_protocol, Protocol::Openai);
+        assert_eq!(plan.context.target_protocol, Protocol::Anthropic);
+        assert_eq!(plan.client_api_code, "codex");
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("OPENAI_RESPONSES_TO_ANTHROPIC_MESSAGES_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Codex Responses streaming to Anthropic Messages must be preflight-valid");
+    }
+
+    #[tokio::test]
+    async fn codex_responses_route_to_gemini_upstream_selects_responses_to_generate_content_plugin()
+    {
+        let state = app_state_with_catalog(empty_catalog()).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Openai,
+            Protocol::Google,
+            "/v1/responses",
+            "/v1",
+            Some("gemini-2.5-pro"),
+            Some("gemini-2.5-pro"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::OpenAiResponses);
+        assert_eq!(plan.context.target, ApiSurface::GeminiGenerateContent);
+        assert_eq!(plan.context.source_protocol, Protocol::Openai);
+        assert_eq!(plan.context.target_protocol, Protocol::Google);
+        assert_eq!(plan.client_api_code, "codex");
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("OPENAI_RESPONSES_TO_GEMINI_GENERATE_CONTENT_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Codex Responses streaming to Gemini GenerateContent must be preflight-valid");
+    }
+
+    #[tokio::test]
+    async fn codex_gpt_route_mapping_route_to_gemini_uses_upstream_model_for_decision_path_and_body(
+    ) {
+        let catalog = catalog_with_vendor_model(
+            vendor(
+                "google",
+                "Google",
+                &[("codex", "unsupported", &[])],
+                &["google_gemini"],
+            ),
+            model("gemini-2.5-pro", "google", "google_gemini"),
+        );
+        let state = app_state_with_catalog(catalog).await;
+        let headers = HeaderMap::new();
+        let mut account = account_with_provider("gemini-route_mapping", ProviderKind::Google);
+        account.models = vec!["gemini-*".to_owned()];
+        account
+            .model_route_mappings
+            .insert("gpt-5.5".to_owned(), "gemini-2.5-pro".to_owned());
+        let upstream_model = resolve_upstream_model(&account, "gpt-5.5");
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Openai,
+            Protocol::Google,
+            "/v1/responses",
+            "/v1",
+            Some("gpt-5.5"),
+            upstream_model,
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::OpenAiResponses);
+        assert_eq!(plan.context.target, ApiSurface::GeminiGenerateContent);
+        assert_eq!(plan.context.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(
+            plan.context.upstream_model.as_deref(),
+            Some("gemini-2.5-pro")
+        );
+        assert_eq!(
+            plan.decision
+                .as_ref()
+                .map(|decision| decision.vendor_code.as_str()),
+            Some("google")
+        );
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("OPENAI_RESPONSES_TO_GEMINI_GENERATE_CONTENT_API")
+        );
+        assert_eq!(
+            map_upstream_path(&state, &plan.context).expect("plugin path"),
+            "/v1/models/gemini-2.5-pro:streamGenerateContent?alt=sse"
+        );
+
+        let forward_body = build_forward_body(
+            br#"{"model":"gpt-5.5","input":"hello","stream":true}"#,
+            &plan.context,
+            &account,
+            plan.policy,
+        )
+        .expect("forward body");
+        let parsed: serde_json::Value = serde_json::from_slice(&forward_body).unwrap();
+        assert!(
+            parsed.get("model").is_none(),
+            "Gemini model is encoded in the upstream path, not the GenerateContent body"
+        );
+    }
+
+    #[test]
+    fn forward_body_applies_configured_official_model_route_mapping_for_openai_upstream() {
+        let mut account = account_with_provider("openai-official", ProviderKind::Openai);
+        account
+            .model_route_mappings
+            .insert("gpt-5.5".to_owned(), "gpt-5.5-2026-05-01".to_owned());
+        let context = TransformContext {
+            source: ApiSurface::OpenAiChatCompletions,
+            target: ApiSurface::OpenAiChatCompletions,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Openai,
+            client_path: "/v1/chat/completions".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: Some("gpt-5.5-2026-05-01".to_owned()),
+            model: Some("gpt-5.5".to_owned()),
+            is_streaming: false,
+        };
+
+        let forward_body = build_forward_body(
+            br#"{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}"#,
+            &context,
+            &account,
+            PluginPolicy::Auto,
+        )
+        .expect("forward body");
+        let parsed: serde_json::Value = serde_json::from_slice(&forward_body).unwrap();
+
+        assert_eq!(parsed["model"], "gpt-5.5-2026-05-01");
+    }
+
+    #[test]
+    fn forward_body_preserves_model_when_responses_request_converts_to_claude_messages() {
+        let account = account_with_provider("claude", ProviderKind::Anthropic);
+        let context = TransformContext {
+            source: ApiSurface::OpenAiResponses,
+            target: ApiSurface::AnthropicMessages,
+            source_protocol: Protocol::Openai,
+            target_protocol: Protocol::Anthropic,
+            client_path: "/v1/responses".to_owned(),
+            client_base_path: "/v1".to_owned(),
+            upstream_model: Some("claude-sonnet-4-20250514".to_owned()),
+            model: Some("claude-sonnet-4-20250514".to_owned()),
+            is_streaming: false,
+        };
+
+        let forward_body = build_forward_body(
+            br#"{"model":"claude-sonnet-4-20250514","input":"hello"}"#,
+            &context,
+            &account,
+            PluginPolicy::Auto,
+        )
+        .expect("forward body");
+        let parsed: serde_json::Value = serde_json::from_slice(&forward_body).unwrap();
+
+        assert_eq!(parsed["model"], "claude-sonnet-4-20250514");
+        assert!(parsed.get("messages").is_some());
+    }
+
+    #[test]
+    fn forward_body_injects_upstream_model_when_gemini_cli_request_converts_to_openai_chat() {
+        let mut account = account_with_provider("openai-route_mapping", ProviderKind::Openai);
+        account.models = vec!["gpt-*".to_owned()];
+        account
+            .model_route_mappings
+            .insert("gemini-2.5-pro".to_owned(), "gpt-5.5".to_owned());
+        let context = TransformContext {
+            source: ApiSurface::GeminiGenerateContent,
+            target: ApiSurface::OpenAiChatCompletions,
+            source_protocol: Protocol::Google,
+            target_protocol: Protocol::Openai,
+            client_path: "/google/v1/models/gemini-2.5-pro:generateContent".to_owned(),
+            client_base_path: "/google".to_owned(),
+            upstream_model: Some("gpt-5.5".to_owned()),
+            model: Some("gemini-2.5-pro".to_owned()),
+            is_streaming: false,
+        };
+
+        let forward_body = build_forward_body(
+            br#"{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}"#,
+            &context,
+            &account,
+            PluginPolicy::Auto,
+        )
+        .expect("forward body");
+        let parsed: serde_json::Value = serde_json::from_slice(&forward_body).unwrap();
+
+        assert_eq!(parsed["model"], "gpt-5.5");
+        assert!(parsed.get("messages").is_some());
+    }
+
+    #[tokio::test]
+    async fn gemini_passthrough_path_rewrites_client_model_route_mapping_to_upstream_model() {
+        let state = app_state_with_catalog(empty_catalog()).await;
+        let headers = HeaderMap::new();
+        let mut account = account_with_provider("gemini-route_mapping", ProviderKind::Google);
+        account.models = vec!["gemini-*".to_owned()];
+        account
+            .model_route_mappings
+            .insert("gpt-5.5".to_owned(), "gemini-2.5-pro".to_owned());
+        let upstream_model = resolve_upstream_model(&account, "gpt-5.5");
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Google,
+            Protocol::Google,
+            "/google/v1/models/gpt-5.5:generateContent",
+            "/google",
+            Some("gpt-5.5"),
+            upstream_model,
+            false,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::GeminiGenerateContent);
+        assert_eq!(plan.context.target, ApiSurface::GeminiGenerateContent);
+        assert_eq!(plan.plugin_id, None);
+        assert_eq!(
+            map_upstream_path(&state, &plan.context).expect("upstream path"),
+            "/v1/models/gemini-2.5-pro:generateContent"
+        );
+    }
+
+    #[test]
+    fn extract_model_decodes_gemini_path_model_segment() {
+        assert_eq!(
+            extract_model(
+                b"{}",
+                "/google/v1/models/publishers%2Fgoogle%2Fmodels%2Fgemini-2.5-pro:generateContent",
+                Protocol::Google,
+            )
+            .as_deref(),
+            Some("publishers/google/models/gemini-2.5-pro")
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_completions_route_to_anthropic_upstream_selects_chat_to_messages_plugin() {
+        let state = app_state_with_catalog(empty_catalog()).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Openai,
+            Protocol::Anthropic,
+            "/v1/chat/completions",
+            "/v1",
+            Some("claude-sonnet-4-20250514"),
+            Some("claude-sonnet-4-20250514"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::OpenAiChatCompletions);
+        assert_eq!(plan.context.target, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.source_protocol, Protocol::Openai);
+        assert_eq!(plan.context.target_protocol, Protocol::Anthropic);
+        assert_eq!(plan.client_api_code, "openai_compatible");
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("OPENAI_CHAT_COMPLETIONS_TO_ANTHROPIC_MESSAGES_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Chat Completions streaming to Anthropic Messages must be preflight-valid");
+    }
+
+    #[tokio::test]
+    async fn chat_completions_route_to_gemini_upstream_selects_chat_to_generate_content_plugin() {
+        let state = app_state_with_catalog(empty_catalog()).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Openai,
+            Protocol::Google,
+            "/v1/chat/completions",
+            "/v1",
+            Some("gemini-2.5-pro"),
+            Some("gemini-2.5-pro"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::OpenAiChatCompletions);
+        assert_eq!(plan.context.target, ApiSurface::GeminiGenerateContent);
+        assert_eq!(plan.context.source_protocol, Protocol::Openai);
+        assert_eq!(plan.context.target_protocol, Protocol::Google);
+        assert_eq!(plan.client_api_code, "openai_compatible");
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("OPENAI_CHAT_COMPLETIONS_TO_GEMINI_GENERATE_CONTENT_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Chat Completions streaming to Gemini GenerateContent must be preflight-valid");
+    }
+
+    #[tokio::test]
+    async fn claude_code_route_to_gemini_upstream_selects_messages_to_generate_content_plugin() {
+        let state = app_state_with_catalog(empty_catalog()).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Anthropic,
+            Protocol::Google,
+            "/anthropic/v1/messages",
+            "/anthropic",
+            Some("gemini-2.5-pro"),
+            Some("gemini-2.5-pro"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.target, ApiSurface::GeminiGenerateContent);
+        assert_eq!(plan.context.source_protocol, Protocol::Anthropic);
+        assert_eq!(plan.context.target_protocol, Protocol::Google);
+        assert_eq!(plan.client_api_code, "claude_code");
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("ANTHROPIC_MESSAGES_TO_GEMINI_GENERATE_CONTENT_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Claude Code streaming to Gemini GenerateContent must be preflight-valid");
+        assert_eq!(
+            map_upstream_path(&state, &plan.context).expect("plugin path"),
+            "/v1/models/gemini-2.5-pro:streamGenerateContent?alt=sse"
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_cli_route_to_openai_chat_upstream_selects_generate_content_to_chat_plugin() {
+        let state = app_state_with_catalog(empty_catalog()).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Google,
+            Protocol::Openai,
+            "/google/v1/models/gemini-2.5-pro:streamGenerateContent",
+            "/google",
+            Some("gpt-4o"),
+            Some("gpt-4o"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::GeminiGenerateContent);
+        assert_eq!(plan.context.target, ApiSurface::OpenAiChatCompletions);
+        assert_eq!(plan.context.source_protocol, Protocol::Google);
+        assert_eq!(plan.context.target_protocol, Protocol::Openai);
+        assert_eq!(plan.client_api_code, "gemini_cli");
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("GEMINI_GENERATE_CONTENT_TO_OPENAI_CHAT_COMPLETIONS_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Gemini CLI streaming to OpenAI Chat must be preflight-valid");
+        assert_eq!(
+            map_upstream_path(&state, &plan.context).expect("plugin path"),
+            "/chat/completions"
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_cli_route_to_anthropic_upstream_selects_generate_content_to_messages_plugin() {
+        let state = app_state_with_catalog(empty_catalog()).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Google,
+            Protocol::Anthropic,
+            "/google/v1/models/gemini-2.5-pro:streamGenerateContent",
+            "/google",
+            Some("claude-sonnet-4-20250514"),
+            Some("claude-sonnet-4-20250514"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::GeminiGenerateContent);
+        assert_eq!(plan.context.target, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.source_protocol, Protocol::Google);
+        assert_eq!(plan.context.target_protocol, Protocol::Anthropic);
+        assert_eq!(plan.client_api_code, "gemini_cli");
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("GEMINI_GENERATE_CONTENT_TO_ANTHROPIC_MESSAGES_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Gemini CLI streaming to Anthropic Messages must be preflight-valid");
+        assert_eq!(
+            map_upstream_path(&state, &plan.context).expect("plugin path"),
+            "/v1/messages"
+        );
+    }
+
+    #[tokio::test]
+    async fn claude_code_route_to_openai_compatible_deepseek_model_selects_messages_to_chat_plugin()
+    {
+        let catalog = catalog_with_vendor_model(
+            vendor(
+                "deepseek",
+                "DeepSeek",
+                &[("claude_code", "unsupported", &[])],
+                &["openai_compatible", "anthropic_messages"],
+            ),
+            model("deepseek-v4-pro", "deepseek", "openai_compatible"),
+        );
+        let state = app_state_with_catalog(catalog).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Anthropic,
+            Protocol::Openai,
+            "/anthropic/v1/messages",
+            "/anthropic",
+            Some("deepseek-v4-pro"),
+            Some("deepseek-v4-pro"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.target, ApiSurface::OpenAiChatCompletions);
+        assert_eq!(plan.context.source_protocol, Protocol::Anthropic);
+        assert_eq!(plan.context.target_protocol, Protocol::Openai);
+        assert_eq!(plan.client_api_code, "claude_code");
+        assert_eq!(
+            plan.decision
+                .as_ref()
+                .map(|decision| decision.vendor_code.as_str()),
+            Some("deepseek")
+        );
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("ANTHROPIC_MESSAGES_TO_OPENAI_CHAT_COMPLETIONS_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Claude Code streaming to OpenAI-compatible DeepSeek must be transformed");
+    }
+
+    #[tokio::test]
+    async fn claude_code_route_to_openai_compatible_chatglm_model_selects_messages_to_chat_plugin()
+    {
+        let catalog = catalog_with_vendor_model(
+            vendor(
+                "zhipu",
+                "Zhipu AI",
+                &[("claude_code", "unsupported", &[])],
+                &["openai_compatible", "anthropic_messages"],
+            ),
+            model("glm-5.1", "zhipu", "openai_compatible"),
+        );
+        let state = app_state_with_catalog(catalog).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Anthropic,
+            Protocol::Openai,
+            "/anthropic/v1/messages",
+            "/anthropic",
+            Some("glm-5.1"),
+            Some("glm-5.1"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.target, ApiSurface::OpenAiChatCompletions);
+        assert_eq!(
+            plan.decision
+                .as_ref()
+                .map(|decision| decision.vendor_code.as_str()),
+            Some("zhipu")
+        );
+        assert_eq!(
+            plan.plugin_id.as_deref(),
+            Some("ANTHROPIC_MESSAGES_TO_OPENAI_CHAT_COMPLETIONS_API")
+        );
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("Claude Code streaming to OpenAI-compatible ChatGLM must be transformed");
+    }
+
+    #[tokio::test]
+    async fn claude_code_route_to_direct_anthropic_deepseek_model_skips_plugin() {
+        let catalog = sdkwork_models::load_bundled_catalog().expect("bundled catalog loads");
+        let state = app_state_with_catalog(catalog).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Anthropic,
+            Protocol::Anthropic,
+            "/anthropic/v1/messages",
+            "/anthropic",
+            Some("deepseek-v4-pro"),
+            Some("deepseek-v4-pro"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.target, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.client_api_code, "claude_code");
+        assert_eq!(
+            plan.decision
+                .as_ref()
+                .map(|decision| decision.vendor_code.as_str()),
+            Some("deepseek")
+        );
+        assert_eq!(plan.plugin_id, None);
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("DeepSeek Anthropic-compatible upstream should passthrough Claude Code shape");
+    }
+
+    #[tokio::test]
+    async fn claude_code_route_to_direct_anthropic_chatglm_model_skips_plugin() {
+        let catalog = sdkwork_models::load_bundled_catalog().expect("bundled catalog loads");
+        let state = app_state_with_catalog(catalog).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Anthropic,
+            Protocol::Anthropic,
+            "/anthropic/v1/messages",
+            "/anthropic",
+            Some("glm-5.1"),
+            Some("glm-5.1"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.target, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.client_api_code, "claude_code");
+        assert_eq!(
+            plan.decision
+                .as_ref()
+                .map(|decision| decision.vendor_code.as_str()),
+            Some("zhipu")
+        );
+        assert_eq!(plan.plugin_id, None);
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("ChatGLM Anthropic-compatible upstream should passthrough Claude Code shape");
+    }
+
+    #[tokio::test]
+    async fn claude_code_route_to_native_anthropic_messages_model_skips_plugin() {
+        let catalog = catalog_with_vendor_model(
+            vendor(
+                "anthropic",
+                "Anthropic",
+                &[("claude_code", "supported", &["anthropic_messages"])],
+                &["anthropic_messages"],
+            ),
+            model(
+                "claude-sonnet-4-20250514",
+                "anthropic",
+                "anthropic_messages",
+            ),
+        );
+        let state = app_state_with_catalog(catalog).await;
+        let headers = HeaderMap::new();
+
+        let plan = build_transform_plan(
+            &state,
+            Protocol::Anthropic,
+            Protocol::Anthropic,
+            "/anthropic/v1/messages",
+            "/anthropic",
+            Some("claude-sonnet-4-20250514"),
+            Some("claude-sonnet-4-20250514"),
+            true,
+            &headers,
+        );
+
+        assert_eq!(plan.context.source, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.context.target, ApiSurface::AnthropicMessages);
+        assert_eq!(plan.plugin_id, None);
+        preflight_transform_plan(&state.transform_registry, &plan)
+            .expect("native Claude Code Messages surface should passthrough");
     }
 
     #[test]
@@ -1750,6 +2587,20 @@ mod tests {
             effective_anthropic_version(&account).as_deref(),
             Some("2023-06-01")
         );
+    }
+
+    #[test]
+    fn upstream_auth_scheme_can_use_bearer_for_anthropic_compatible_accounts() {
+        let mut account = account_with_provider("deepseek-anthropic", ProviderKind::Anthropic);
+        account.upstream_api_key = "sk-upstream".to_owned();
+        account.upstream_auth_scheme = Some("bearer".to_owned());
+
+        let auth = build_auth_for_provider(&account).expect("auth injection");
+
+        match auth {
+            AuthInjection::Bearer(token) => assert_eq!(token, "sk-upstream"),
+            other => panic!("expected bearer auth, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1836,6 +2687,7 @@ mod tests {
             target_protocol: Protocol::Openai,
             client_path: "/v1/responses".to_owned(),
             client_base_path: "/v1".to_owned(),
+            upstream_model: None,
             model: Some("gpt-5".to_owned()),
             is_streaming: false,
         }
@@ -1847,6 +2699,7 @@ mod tests {
             provider: ProviderKind::Openai,
             base_url: "https://example.test/v1".to_owned(),
             upstream_api_key: String::new(),
+            upstream_auth_scheme: None,
             models: vec![],
             priority: 10,
             timeout: Duration::from_secs(30),
@@ -1855,7 +2708,7 @@ mod tests {
             anthropic_version: None,
             default_headers: BTreeMap::new(),
             enabled: true,
-            model_aliases: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
         }
     }
 
@@ -1865,6 +2718,7 @@ mod tests {
             provider,
             base_url: "https://example.test".to_owned(),
             upstream_api_key: String::new(),
+            upstream_auth_scheme: None,
             models: vec!["*".to_owned()],
             priority: 10,
             timeout: Duration::from_secs(30),
@@ -1873,7 +2727,7 @@ mod tests {
             anthropic_version: None,
             default_headers: BTreeMap::new(),
             enabled: true,
-            model_aliases: BTreeMap::new(),
+            model_route_mappings: BTreeMap::new(),
         }
     }
 

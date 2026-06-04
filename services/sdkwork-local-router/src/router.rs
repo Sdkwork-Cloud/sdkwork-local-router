@@ -65,6 +65,7 @@ pub async fn build_router(
             provider: u.provider.clone(),
             base_url: u.base_url.clone(),
             upstream_api_key: u.upstream_api_key.clone(),
+            upstream_auth_scheme: u.upstream_auth_scheme.clone(),
             models: u.models.clone(),
             priority: u.priority,
             timeout: u.timeout,
@@ -73,7 +74,7 @@ pub async fn build_router(
             anthropic_version: u.anthropic_version.clone(),
             default_headers: u.default_headers.clone(),
             enabled: true,
-            model_aliases: u.model_aliases.clone(),
+            model_route_mappings: u.model_route_mappings.clone(),
         })
         .collect();
 
@@ -257,14 +258,22 @@ fn local_router_open_api_routes(
 }
 
 fn local_router_app_api_routes() -> Router<AppState> {
-    let prefix = crate::api_groups::LOCAL_ROUTER_APP_API_PREFIX;
+    let canonical_prefix = crate::api_groups::LOCAL_ROUTER_APP_API_PREFIX;
+    local_router_app_api_routes_for_prefix(canonical_prefix)
+}
+
+fn local_router_app_api_routes_for_prefix(prefix: &str) -> Router<AppState> {
     Router::new()
         .route(&format!("{prefix}/status"), get(integration::router_status))
         .route(&format!("{prefix}/models"), get(integration::list_models))
 }
 
 fn local_router_backend_api_routes() -> Router<AppState> {
-    let prefix = crate::api_groups::LOCAL_ROUTER_BACKEND_API_PREFIX;
+    let canonical_prefix = crate::api_groups::LOCAL_ROUTER_BACKEND_API_PREFIX;
+    local_router_backend_api_routes_for_prefix(canonical_prefix)
+}
+
+fn local_router_backend_api_routes_for_prefix(prefix: &str) -> Router<AppState> {
     Router::new()
         .route(
             &format!("{prefix}/upstreams"),
@@ -299,6 +308,15 @@ fn local_router_backend_api_routes() -> Router<AppState> {
         .route(
             &format!("{prefix}/accounts/{{accountId}}/toggle"),
             post(integration::toggle_account),
+        )
+        .route(
+            &format!("{prefix}/model_route_mappings"),
+            get(integration::list_model_route_mappings)
+                .post(integration::upsert_model_route_mapping),
+        )
+        .route(
+            &format!("{prefix}/model_route_mappings/{{modelRouteMappingId}}"),
+            axum::routing::delete(integration::delete_model_route_mapping),
         )
         .route(&format!("{prefix}/usages"), get(integration::list_usages))
         .route(
@@ -437,7 +455,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
-                    .uri("/backend/v3/api/router/api_groups")
+                    .uri("/backend/v3/api/local_router/api_groups")
                     .header(crate::auth::X_SDKWORK_SUBJECT_USER_ID_HEADER, "42")
                     .body(Body::empty())
                     .unwrap(),
@@ -459,11 +477,153 @@ mod tests {
         assert!(groups
             .iter()
             .any(|group| group["code"] == "local-router-app-api"
-                && group["canonical_prefix"] == "/app/v3/api/router"));
+                && group["canonical_prefix"] == "/app/v3/api/local_router"));
         assert!(groups
             .iter()
             .any(|group| group["code"] == "local-router-backend-api"
-                && group["canonical_prefix"] == "/backend/v3/api/router"));
+                && group["canonical_prefix"] == "/backend/v3/api/local_router"));
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn app_and_backend_router_paths_only_expose_local_router_prefixes() {
+        let (url, path) = temp_sqlite_url("api-prefixes");
+        let store = Store::new(&url).await.unwrap();
+        store.run_migrations().await.unwrap();
+        let config =
+            RuntimeConfig::from_toml(&sdkwork_lr_config::RuntimeTomlConfig::default()).unwrap();
+        let rate_limiter = Arc::new(RateLimiter::new(60, 60));
+        let (app, _health_manager, _pool, _strategy_overrides) =
+            build_router(&config, store.clone(), rate_limiter)
+                .await
+                .unwrap();
+
+        for uri in [
+            "/app/v3/api/local_router/status",
+            "/backend/v3/api/local_router/api_groups",
+            "/backend/v3/api/local_router/model_route_mappings",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::GET)
+                        .uri(uri)
+                        .header(crate::auth::X_SDKWORK_SUBJECT_USER_ID_HEADER, "42")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        }
+
+        let removed_app_prefix = format!("/app/v3/api/{}", "router");
+        let removed_backend_prefix = format!("/backend/v3/api/{}", "router");
+        let removed_mapping_path = format!("/backend/v3/api/local_router/model_{}", "aliases");
+        for uri in [
+            format!("{removed_app_prefix}/status"),
+            format!("{removed_backend_prefix}/api_groups"),
+            removed_mapping_path,
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::GET)
+                        .uri(&uri)
+                        .header(crate::auth::X_SDKWORK_SUBJECT_USER_ID_HEADER, "42")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+        }
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn backend_accounts_response_uses_model_route_mapping_names() {
+        let (url, path) = temp_sqlite_url("accounts-route-mappings");
+        let store = Store::new(&url).await.unwrap();
+        store.run_migrations().await.unwrap();
+        let mut route_mappings = std::collections::BTreeMap::new();
+        route_mappings.insert("gpt-5.5".to_owned(), "gemini-2.5-pro".to_owned());
+        let account_id = store
+            .insert_account(&sdkwork_lr_store::NewAccount {
+                user_id: 42,
+                name: "gemini".to_owned(),
+                provider: "google".to_owned(),
+                base_url: "https://generativelanguage.googleapis.com".to_owned(),
+                upstream_api_key: "sk-upstream".to_owned(),
+                upstream_auth_scheme: None,
+                models: vec!["gemini-*".to_owned()],
+                priority: 10,
+                timeout_secs: 120,
+                max_retries: 0,
+                retry_delay_ms: 500,
+                anthropic_version: None,
+                default_headers: std::collections::BTreeMap::new(),
+                model_route_mappings: route_mappings,
+                enabled: true,
+            })
+            .await
+            .unwrap();
+        store
+            .upsert_model_route_mapping(&sdkwork_lr_store::NewModelRouteMapping {
+                user_id: 42,
+                account_id,
+                account_name: "gemini".to_owned(),
+                client_model: "codex-gemini".to_owned(),
+                upstream_model: "gemini-2.5-flash".to_owned(),
+                enabled: true,
+                notes: None,
+            })
+            .await
+            .unwrap();
+
+        let config =
+            RuntimeConfig::from_toml(&sdkwork_lr_config::RuntimeTomlConfig::default()).unwrap();
+        let rate_limiter = Arc::new(RateLimiter::new(60, 60));
+        let (app, _health_manager, _pool, _strategy_overrides) =
+            build_router(&config, store.clone(), rate_limiter)
+                .await
+                .unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/backend/v3/api/local_router/accounts")
+                    .header(crate::auth::X_SDKWORK_SUBJECT_USER_ID_HEADER, "42")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let account = &payload["accounts"][0];
+        assert!(account.get("model_route_mappings").is_some());
+        assert!(account.get("model_route_mapping_rows").is_some());
+        let removed_field = format!("model_{}", "aliases");
+        assert!(account.get(&removed_field).is_none());
+        assert_eq!(account["model_route_mappings"]["gpt-5.5"], "gemini-2.5-pro");
+        assert_eq!(
+            account["model_route_mappings"]["codex-gemini"],
+            "gemini-2.5-flash"
+        );
 
         drop(store);
         let _ = std::fs::remove_file(path);
@@ -481,6 +641,7 @@ mod tests {
                 provider: "openai".to_owned(),
                 base_url: "https://primary.example/v1".to_owned(),
                 upstream_api_key: Some("sk-primary".to_owned()),
+                upstream_auth_scheme: None,
                 models: vec!["*".to_owned()],
                 priority: Some(10),
                 timeout_secs: None,
@@ -488,13 +649,14 @@ mod tests {
                 retry_delay_ms: None,
                 anthropic_version: None,
                 default_headers: std::collections::BTreeMap::new(),
-                model_aliases: std::collections::BTreeMap::new(),
+                model_route_mappings: std::collections::BTreeMap::new(),
             },
             sdkwork_lr_config::UpstreamSectionConfig {
                 name: "secondary".to_owned(),
                 provider: "openai".to_owned(),
                 base_url: "https://secondary.example/v1".to_owned(),
                 upstream_api_key: Some("sk-secondary".to_owned()),
+                upstream_auth_scheme: None,
                 models: vec!["*".to_owned()],
                 priority: Some(20),
                 timeout_secs: None,
@@ -502,7 +664,7 @@ mod tests {
                 retry_delay_ms: None,
                 anthropic_version: None,
                 default_headers: std::collections::BTreeMap::new(),
-                model_aliases: std::collections::BTreeMap::new(),
+                model_route_mappings: std::collections::BTreeMap::new(),
             },
         ];
         let config = RuntimeConfig::from_toml(&toml_config).unwrap();
@@ -522,7 +684,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/backend/v3/api/router/strategy")
+                    .uri("/backend/v3/api/local_router/strategy")
                     .header(crate::auth::X_SDKWORK_SUBJECT_USER_ID_HEADER, "0")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"strategy":"priority"}"#))
@@ -548,7 +710,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri("/backend/v3/api/router/strategy")
+                    .uri("/backend/v3/api/local_router/strategy")
                     .header(crate::auth::X_SDKWORK_SUBJECT_USER_ID_HEADER, "0")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(r#"{"strategy":"auto"}"#))
@@ -614,14 +776,14 @@ mod tests {
             .iter()
             .find(|group| group.code == "local-router-app-api")
             .expect("app api group");
-        assert_eq!(app_api.canonical_prefix, "/app/v3/api/router");
+        assert_eq!(app_api.canonical_prefix, "/app/v3/api/local_router");
         assert_eq!(app_api.auth_scheme, "sdkwork_dual_token_or_jwt");
 
         let backend_api = groups
             .iter()
             .find(|group| group.code == "local-router-backend-api")
             .expect("backend api group");
-        assert_eq!(backend_api.canonical_prefix, "/backend/v3/api/router");
+        assert_eq!(backend_api.canonical_prefix, "/backend/v3/api/local_router");
         assert!(backend_api
             .capabilities
             .iter()
