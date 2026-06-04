@@ -101,7 +101,11 @@ impl AccountHealth {
                     drop(inner);
                     {
                         let mut inner = self.inner.write();
-                        if inner.state == HealthState::CircuitOpen && inner.opened_at.map_or(false, |t| t.elapsed() >= self.config.open_duration) {
+                        if inner.state == HealthState::CircuitOpen
+                            && inner
+                                .opened_at
+                                .map_or(false, |t| t.elapsed() >= self.config.open_duration)
+                        {
                             inner.state = HealthState::Degraded;
                             inner.half_open_requests = 0;
                             inner.consecutive_successes = 0;
@@ -138,6 +142,13 @@ impl AccountHealth {
         inner.consecutive_failures = 0;
         inner.last_success_at = Some(Instant::now());
 
+        // Release the half-open probe slot that was acquired via `is_available`.
+        // Guarded to prevent underflow if callers ever call record_success
+        // without a corresponding is_available reservation.
+        if inner.half_open_requests > 0 {
+            inner.half_open_requests -= 1;
+        }
+
         match inner.state {
             HealthState::Degraded => {
                 if inner.consecutive_successes >= self.config.success_threshold {
@@ -166,6 +177,11 @@ impl AccountHealth {
         inner.consecutive_failures += 1;
         inner.consecutive_successes = 0;
         inner.last_failure_at = Some(Instant::now());
+
+        // Release the half-open probe slot on failure too.
+        if inner.half_open_requests > 0 {
+            inner.half_open_requests -= 1;
+        }
 
         match inner.state {
             HealthState::Healthy => {
@@ -272,7 +288,10 @@ impl HealthManager {
     }
 
     pub fn register(&self, account_name: &str) -> Arc<AccountHealth> {
-        let health = Arc::new(AccountHealth::new(account_name.to_owned(), self.config.clone()));
+        let health = Arc::new(AccountHealth::new(
+            account_name.to_owned(),
+            self.config.clone(),
+        ));
         let mut healths = self.healths.write();
         healths.insert(account_name.to_owned(), health.clone());
         health
@@ -281,7 +300,8 @@ impl HealthManager {
     pub fn register_all(&self, account_names: &[String]) {
         let mut healths = self.healths.write();
         for name in account_names {
-            healths.entry(name.clone())
+            healths
+                .entry(name.clone())
                 .or_insert_with(|| Arc::new(AccountHealth::new(name.clone(), self.config.clone())));
         }
         let name_set: HashSet<&String> = account_names.iter().collect();
@@ -293,7 +313,8 @@ impl HealthManager {
     }
 
     pub fn is_available(&self, account_name: &str) -> bool {
-        self.healths.read()
+        self.healths
+            .read()
             .get(account_name)
             .map(|h| h.is_available())
             .unwrap_or(true)
@@ -312,10 +333,7 @@ impl HealthManager {
     }
 
     pub fn snapshots(&self) -> Vec<AccountHealthSnapshot> {
-        self.healths.read()
-            .values()
-            .map(|h| h.snapshot())
-            .collect()
+        self.healths.read().values().map(|h| h.snapshot()).collect()
     }
 
     pub fn force_open(&self, account_name: &str) -> bool {
@@ -337,15 +355,27 @@ impl HealthManager {
     }
 
     pub fn healthy_count(&self) -> usize {
-        self.healths.read().values().filter(|h| h.state() == HealthState::Healthy).count()
+        self.healths
+            .read()
+            .values()
+            .filter(|h| h.state() == HealthState::Healthy)
+            .count()
     }
 
     pub fn degraded_count(&self) -> usize {
-        self.healths.read().values().filter(|h| h.state() == HealthState::Degraded).count()
+        self.healths
+            .read()
+            .values()
+            .filter(|h| h.state() == HealthState::Degraded)
+            .count()
     }
 
     pub fn circuit_open_count(&self) -> usize {
-        self.healths.read().values().filter(|h| h.state() == HealthState::CircuitOpen).count()
+        self.healths
+            .read()
+            .values()
+            .filter(|h| h.state() == HealthState::CircuitOpen)
+            .count()
     }
 }
 

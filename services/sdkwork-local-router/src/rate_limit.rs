@@ -49,10 +49,13 @@ impl RateLimiter {
             return true;
         }
 
-        self.entries.insert(key, RateLimitEntry {
-            count: 1,
-            window_start: now,
-        });
+        self.entries.insert(
+            key,
+            RateLimitEntry {
+                count: 1,
+                window_start: now,
+            },
+        );
         true
     }
 
@@ -78,13 +81,17 @@ pub async fn rate_limit_middleware(
     if state.rate_limiter.check(client_key) {
         next.run(req).await
     } else {
-        (StatusCode::TOO_MANY_REQUESTS, axum::Json(json!({
-            "error": {
-                "message": "rate limit exceeded",
-                "type": "rate_limit_error",
-                "code": 429
-            }
-        }))).into_response()
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(json!({
+                "error": {
+                    "message": "rate limit exceeded",
+                    "type": "rate_limit_error",
+                    "code": 429
+                }
+            })),
+        )
+            .into_response()
     }
 }
 

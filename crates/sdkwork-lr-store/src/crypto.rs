@@ -1,5 +1,5 @@
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
-use aes_gcm::{Aes256Gcm, Aes256GcmKey, Nonce};
+use aes_gcm::aead::{Aead, Key, KeyInit, OsRng};
+use aes_gcm::{Aes256Gcm, Nonce};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use rand::RngCore;
 
@@ -8,8 +8,11 @@ use std::fmt;
 const NONCE_SIZE: usize = 12;
 const ENCRYPTION_PREFIX: &str = "enc:v1:";
 
+type AesKey = Key<Aes256Gcm>;
+
+#[derive(Clone)]
 pub struct KeyEncryption {
-    key: Aes256GcmKey<aes_gcm::aead::generic_array::typenum::U32>,
+    key: AesKey,
     enabled: bool,
 }
 
@@ -17,30 +20,32 @@ impl fmt::Debug for KeyEncryption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("KeyEncryption")
             .field("enabled", &self.enabled)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl KeyEncryption {
     pub fn new(secret: &str) -> Self {
         if secret.is_empty() {
-            tracing::warn!("no encryption secret configured, API keys will be stored in plaintext");
+            tracing::warn!(
+                "no encryption secret configured, upstream API keys will be stored in plaintext"
+            );
             return Self {
-                key: *Aes256GcmKey::<aes_gcm::aead::generic_array::typenum::U32>::from_slice(&[0u8; 32]),
+                key: Key::<Aes256Gcm>::from_slice(&[0u8; 32]).clone(),
                 enabled: false,
             };
         }
 
         let key_bytes = Self::derive_key(secret);
         Self {
-            key: *Aes256GcmKey::from_slice(&key_bytes),
+            key: *Key::<Aes256Gcm>::from_slice(&key_bytes),
             enabled: true,
         }
     }
 
     pub fn disabled() -> Self {
         Self {
-            key: *Aes256GcmKey::<aes_gcm::aead::generic_array::typenum::U32>::from_slice(&[0u8; 32]),
+            key: Key::<Aes256Gcm>::from_slice(&[0u8; 32]).clone(),
             enabled: false,
         }
     }
@@ -71,7 +76,7 @@ impl KeyEncryption {
                 format!("{}{}", ENCRYPTION_PREFIX, BASE64.encode(&combined))
             }
             Err(e) => {
-                tracing::error!(error = %e, "failed to encrypt API key, storing plaintext");
+                tracing::error!(error = %e, "failed to encrypt upstream API key, storing plaintext");
                 plaintext.to_owned()
             }
         }
@@ -90,13 +95,13 @@ impl KeyEncryption {
         let combined = match BASE64.decode(encoded) {
             Ok(data) => data,
             Err(e) => {
-                tracing::error!(error = %e, "failed to decode encrypted API key, returning as-is");
+                tracing::error!(error = %e, "failed to decode encrypted upstream API key, returning as-is");
                 return ciphertext.to_owned();
             }
         };
 
         if combined.len() < NONCE_SIZE + 1 {
-            tracing::error!("encrypted API key too short, returning as-is");
+            tracing::error!("encrypted upstream API key too short, returning as-is");
             return ciphertext.to_owned();
         }
 
@@ -106,47 +111,29 @@ impl KeyEncryption {
 
         match cipher.decrypt(nonce, encrypted_data) {
             Ok(plaintext) => String::from_utf8(plaintext).unwrap_or_else(|e| {
-                tracing::error!(error = %e, "decrypted API key is not valid UTF-8");
+                tracing::error!(error = %e, "decrypted upstream API key is not valid UTF-8");
                 ciphertext.to_owned()
             }),
             Err(e) => {
-                tracing::error!(error = %e, "failed to decrypt API key, returning as-is");
+                tracing::error!(error = %e, "failed to decrypt upstream API key, returning as-is");
                 ciphertext.to_owned()
             }
         }
     }
 
     fn derive_key(secret: &str) -> [u8; 32] {
-        use sha2::{Sha256, Digest};
+        use hkdf::Hkdf;
+        use sha2::Sha256;
 
-        let salt = b"sdkwork-lr-key-derivation-salt-v1";
-        let info = b"aes-256-gcm-key";
-
-        let mut prk_input = Vec::with_capacity(salt.len() + secret.len());
-        prk_input.extend_from_slice(salt);
-        prk_input.extend_from_slice(secret.as_bytes());
-
-        let mut hasher = Sha256::new();
-        hasher.update(&prk_input);
-        let prk = hasher.finalize();
-
-        let mut okm_input = Vec::with_capacity(prk.len() + info.len() + 4);
-        okm_input.extend_from_slice(&prk);
-        okm_input.extend_from_slice(info);
-        okm_input.extend_from_slice(&[0x01]);
-
-        let mut hasher2 = Sha256::new();
-        hasher2.update(&okm_input);
+        // Per-secret unique salt mixed with a domain separator. HKDF-Expand
+        // produces a uniformly random 32-byte AES-256 key from the input secret.
+        let mut salt = Vec::with_capacity(secret.len() + 16);
+        salt.extend_from_slice(b"sdkwork-lr-v1");
+        salt.extend_from_slice(secret.as_bytes());
+        let hk = Hkdf::<Sha256>::new(Some(&salt), secret.as_bytes());
         let mut key = [0u8; 32];
-        key.copy_from_slice(&hasher2.finalize()[..32]);
-
-        let mut stretch_input = Vec::with_capacity(32 + secret.len());
-        stretch_input.extend_from_slice(&key);
-        stretch_input.extend_from_slice(secret.as_bytes());
-        let mut hasher3 = Sha256::new();
-        hasher3.update(&stretch_input);
-        key.copy_from_slice(&hasher3.finalize()[..32]);
-
+        hk.expand(b"aes-256-gcm-key", &mut key)
+            .expect("HKDF expand for fixed-length 32-byte buffer is infallible");
         key
     }
 }

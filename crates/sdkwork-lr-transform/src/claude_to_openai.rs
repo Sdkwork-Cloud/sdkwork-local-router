@@ -1,4 +1,4 @@
-﻿﻿use serde_json::{json, Value};
+use serde_json::{json, Value};
 
 pub fn transform_response(claude_body: &Value, model: &str) -> Result<Value, String> {
     let content = claude_body.get("content").and_then(|v| v.as_array());
@@ -18,8 +18,16 @@ pub fn transform_response(claude_body: &Value, model: &str) -> Result<Value, Str
                     }
                 }
                 "tool_use" => {
-                    let id = block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_owned();
-                    let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                    let id = block
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_owned();
+                    let name = block
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_owned();
                     let arguments = block.get("input").cloned().unwrap_or(json!({}));
                     let arguments_str = serde_json::to_string(&arguments).unwrap_or_default();
 
@@ -51,14 +59,17 @@ pub fn transform_response(claude_body: &Value, model: &str) -> Result<Value, Str
         _ => "stop",
     };
 
-    let usage = claude_body.get("usage").map(|u| {
-        json!({
-            "prompt_tokens": u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-            "completion_tokens": u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-            "total_tokens": u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
-                + u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+    let usage = claude_body
+        .get("usage")
+        .map(|u| {
+            json!({
+                "prompt_tokens": u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                "completion_tokens": u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                "total_tokens": u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+                    + u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            })
         })
-    }).unwrap_or_else(|| json!({"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}));
+        .unwrap_or_else(|| json!({"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}));
 
     let mut message = json!({
         "role": "assistant",
@@ -121,8 +132,13 @@ mod tests {
         });
         let result = transform_response(&input, "claude-3-sonnet").unwrap();
         assert_eq!(result["choices"][0]["finish_reason"], "tool_calls");
-        let tool_calls = result["choices"][0]["message"]["tool_calls"].as_array().unwrap();
+        let tool_calls = result["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap();
         assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
-        assert_eq!(result["choices"][0]["message"]["content"], serde_json::Value::Null);
+        assert_eq!(
+            result["choices"][0]["message"]["content"],
+            serde_json::Value::Null
+        );
     }
 }

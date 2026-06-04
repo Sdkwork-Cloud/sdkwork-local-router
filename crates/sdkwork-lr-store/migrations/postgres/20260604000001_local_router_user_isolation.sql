@@ -1,0 +1,3 @@
+-- User isolation, client API keys, invocation metadata, usage ownership, and
+-- local_router_ table prefixes are part of the initial schema for fresh local
+-- router databases. This migration version is retained as a no-op marker.

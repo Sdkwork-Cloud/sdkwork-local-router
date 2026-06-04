@@ -1,13 +1,12 @@
-﻿use serde::Deserialize;
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RuntimeTomlConfig {
     pub server: ServerSectionConfig,
-    pub auth: AuthSectionConfig,
     pub storage: StorageSectionConfig,
     pub logging: LoggingSectionConfig,
     pub base_paths: BasePathSectionConfig,
@@ -19,6 +18,7 @@ pub struct RuntimeTomlConfig {
     pub recording: RecordingSectionConfig,
     pub circuit_breaker: CircuitBreakerSectionConfig,
     pub health_probe: HealthProbeSectionConfig,
+    pub plugins: PluginSectionConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -27,13 +27,6 @@ pub struct ServerSectionConfig {
     pub bind: Option<String>,
     pub port: Option<u16>,
     pub max_body_size_mb: Option<u64>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default)]
-pub struct AuthSectionConfig {
-    pub mode: Option<String>,
-    pub api_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -64,7 +57,8 @@ pub struct UpstreamSectionConfig {
     pub name: String,
     pub provider: String,
     pub base_url: String,
-    pub api_key: Option<String>,
+    #[serde(alias = "api_key")]
+    pub upstream_api_key: Option<String>,
     pub models: Vec<String>,
     pub priority: Option<u32>,
     pub timeout_secs: Option<u64>,
@@ -127,10 +121,17 @@ pub struct HealthProbeSectionConfig {
     pub probe_timeout_secs: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct PluginSectionConfig {
+    pub enabled: Option<bool>,
+    pub policy: Option<String>,
+    pub expose_decision_headers: Option<bool>,
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub server: ServerConfig,
-    pub auth: AuthConfig,
     pub storage: StorageConfig,
     pub logging: LoggingConfig,
     pub base_paths: BasePathConfig,
@@ -142,6 +143,7 @@ pub struct RuntimeConfig {
     pub recording: RecordingConfig,
     pub circuit_breaker: CircuitBreakerConfig,
     pub health_probe: HealthProbeConfig,
+    pub plugins: PluginConfig,
     pub config_file_path: Option<String>,
 }
 
@@ -156,18 +158,6 @@ impl ServerConfig {
     pub fn max_body_size_bytes(&self) -> usize {
         (self.max_body_size_mb as usize) * 1024 * 1024
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct AuthConfig {
-    pub mode: AuthMode,
-    pub api_keys: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthMode {
-    None,
-    StaticKey,
 }
 
 #[derive(Debug, Clone)]
@@ -200,7 +190,7 @@ pub struct UpstreamConfig {
     pub name: String,
     pub provider: sdkwork_lr_core::ProviderKind,
     pub base_url: String,
-    pub api_key: String,
+    pub upstream_api_key: String,
     pub models: Vec<String>,
     pub priority: u32,
     pub timeout: Duration,
@@ -238,6 +228,30 @@ impl CorsConfig {
 #[derive(Debug, Clone)]
 pub struct RoutingConfig {
     pub strategy: sdkwork_lr_core::RoutingStrategy,
+    pub strategy_explicit: bool,
+}
+
+impl RoutingConfig {
+    pub fn strategy_for_account_count(
+        &self,
+        account_count: usize,
+    ) -> sdkwork_lr_core::RoutingStrategy {
+        if self.strategy_explicit {
+            self.strategy
+        } else {
+            default_routing_strategy_for_account_count(account_count)
+        }
+    }
+}
+
+fn default_routing_strategy_for_account_count(
+    account_count: usize,
+) -> sdkwork_lr_core::RoutingStrategy {
+    if account_count > 1 {
+        sdkwork_lr_core::RoutingStrategy::RoundRobin
+    } else {
+        sdkwork_lr_core::RoutingStrategy::Priority
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -283,12 +297,24 @@ impl Default for HealthProbeConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PluginConfig {
+    pub enabled: bool,
+    pub policy: sdkwork_lr_plugin::PluginPolicy,
+    pub expose_decision_headers: bool,
+}
+
 impl RuntimeTomlConfig {
+    pub fn from_str_strict(content: &str) -> Result<Self, String> {
+        toml::from_str(content).map_err(|e| format!("invalid TOML: {e}"))
+    }
+
     pub fn from_config_file(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("failed to read config file {}: {e}", path.display()))?;
-        toml::from_str(&content).map_err(|e| format!("invalid TOML in {}: {e}", path.display()))
+        Self::from_str_strict(&content)
+            .map_err(|e| format!("invalid TOML in {}: {e}", path.display()))
     }
 
     pub fn from_env_config_file() -> Result<Option<Self>, String> {
@@ -307,32 +333,44 @@ impl RuntimeConfig {
     pub fn from_toml(toml_config: &RuntimeTomlConfig) -> Result<Self, String> {
         let bind = config_value("SDKWORK_LR_BIND", toml_config.server.bind.as_deref())
             .unwrap_or_else(|| "127.0.0.1".to_owned());
-        let port = env_u16("SDKWORK_LR_PORT").or(toml_config.server.port).unwrap_or(8080);
+        let port = env_u16("SDKWORK_LR_PORT")
+            .or(toml_config.server.port)
+            .unwrap_or(8080);
 
-        let auth_mode = config_value("SDKWORK_LR_AUTH_MODE", toml_config.auth.mode.as_deref())
-            .unwrap_or_else(|| "none".to_owned());
-        let auth_mode = match auth_mode.to_ascii_lowercase().as_str() {
-            "static-key" | "static_key" => AuthMode::StaticKey,
-            "none" => AuthMode::None,
-            other => return Err(format!("unknown auth.mode '{}': expected 'static-key' or 'none'", other)),
-        };
-
-        let database_url = config_value("SDKWORK_LR_DATABASE_URL", toml_config.storage.database_url.as_deref())
-            .unwrap_or_else(|| format!("sqlite:./data/local-router-{port}.db?mode=rwc"));
+        let database_url = config_value(
+            "SDKWORK_LR_DATABASE_URL",
+            toml_config.storage.database_url.as_deref(),
+        )
+        .unwrap_or_else(|| format!("sqlite:./data/local-router-{port}.db?mode=rwc"));
 
         let log_level = config_value("SDKWORK_LR_LOG_LEVEL", toml_config.logging.level.as_deref())
             .unwrap_or_else(|| "info".to_owned());
-        let log_format_str = config_value("SDKWORK_LR_LOG_FORMAT", toml_config.logging.format.as_deref())
-            .unwrap_or_else(|| "text".to_owned());
+        let log_format_str = config_value(
+            "SDKWORK_LR_LOG_FORMAT",
+            toml_config.logging.format.as_deref(),
+        )
+        .unwrap_or_else(|| "text".to_owned());
         let log_format = match log_format_str.to_ascii_lowercase().as_str() {
             "json" => LogFormat::Json,
             _ => LogFormat::Text,
         };
 
         let base_paths = BasePathConfig {
-            openai: toml_config.base_paths.openai.clone().unwrap_or_else(|| "/v1".to_owned()),
-            anthropic: toml_config.base_paths.anthropic.clone().unwrap_or_else(|| "/anthropic".to_owned()),
-            google: toml_config.base_paths.google.clone().unwrap_or_else(|| "/google".to_owned()),
+            openai: toml_config
+                .base_paths
+                .openai
+                .clone()
+                .unwrap_or_else(|| "/v1".to_owned()),
+            anthropic: toml_config
+                .base_paths
+                .anthropic
+                .clone()
+                .unwrap_or_else(|| "/anthropic".to_owned()),
+            google: toml_config
+                .base_paths
+                .google
+                .clone()
+                .unwrap_or_else(|| "/google".to_owned()),
         };
 
         if base_paths.openai == base_paths.anthropic
@@ -347,7 +385,10 @@ impl RuntimeConfig {
 
         let max_body_size_mb = toml_config.server.max_body_size_mb.unwrap_or(50);
         if max_body_size_mb < 1 {
-            return Err(format!("server.max_body_size_mb must be at least 1, got {}", max_body_size_mb));
+            return Err(format!(
+                "server.max_body_size_mb must be at least 1, got {}",
+                max_body_size_mb
+            ));
         }
 
         let mut upstreams = Vec::new();
@@ -358,12 +399,13 @@ impl RuntimeConfig {
             if u.base_url.is_empty() {
                 return Err(format!("upstream {}: base_url must not be blank", u.name));
             }
-            let api_key = resolve_env_or_value(u.api_key.as_deref()).unwrap_or_default();
+            let upstream_api_key =
+                resolve_env_or_value(u.upstream_api_key.as_deref()).unwrap_or_default();
             upstreams.push(UpstreamConfig {
                 name: u.name.clone(),
                 provider: sdkwork_lr_core::ProviderKind::from_str_loose(&u.provider),
                 base_url: u.base_url.trim_end_matches('/').to_owned(),
-                api_key,
+                upstream_api_key,
                 models: u.models.clone(),
                 priority: u.priority.unwrap_or(10),
                 timeout: Duration::from_secs(u.timeout_secs.unwrap_or(120)),
@@ -373,18 +415,29 @@ impl RuntimeConfig {
                 default_headers: u.default_headers.clone(),
                 model_aliases: u.model_aliases.clone(),
             });
+        }
+        let upstream_count = upstreams.len();
 
         let window_secs = toml_config.rate_limit.window_secs.unwrap_or(60);
         if window_secs < 1 {
-            return Err(format!("rate_limit.window_secs must be at least 1, got {}", window_secs));
+            return Err(format!(
+                "rate_limit.window_secs must be at least 1, got {}",
+                window_secs
+            ));
         }
         let fallback_max_attempts = toml_config.fallback.max_attempts.unwrap_or(3);
         if fallback_max_attempts < 1 || fallback_max_attempts > 20 {
-            return Err(format!("fallback.max_attempts must be between 1 and 20, got {}", fallback_max_attempts));
+            return Err(format!(
+                "fallback.max_attempts must be between 1 and 20, got {}",
+                fallback_max_attempts
+            ));
         }
         let health_interval = toml_config.health_probe.interval_secs.unwrap_or(30);
         if health_interval < 5 {
-            return Err(format!("health_probe.interval_secs must be at least 5, got {}", health_interval));
+            return Err(format!(
+                "health_probe.interval_secs must be at least 5, got {}",
+                health_interval
+            ));
         }
         let probe_timeout = toml_config.health_probe.probe_timeout_secs.unwrap_or(10);
         if probe_timeout < 1 || probe_timeout > health_interval {
@@ -393,12 +446,30 @@ impl RuntimeConfig {
                 probe_timeout, health_interval
             ));
         }
-        let encryption_secret = toml_config.storage.encryption_secret
+        let encryption_secret = toml_config
+            .storage
+            .encryption_secret
+            .clone()
             .or_else(|| std::env::var("SDKWORK_LR_ENCRYPTION_SECRET").ok())
             .unwrap_or_default();
         if !encryption_secret.is_empty() && encryption_secret.len() < 8 {
-            return Err("encryption_secret must be at least 8 characters for adequate security".to_owned());
+            return Err(
+                "encryption_secret must be at least 8 characters for adequate security".to_owned(),
+            );
         }
+
+        let plugin_policy_code = config_value(
+            "SDKWORK_LR_PLUGIN_POLICY",
+            toml_config.plugins.policy.as_deref(),
+        )
+        .unwrap_or_else(|| "auto".to_owned());
+        let plugin_policy = sdkwork_lr_plugin::PluginPolicy::from_code(&plugin_policy_code)
+            .ok_or_else(|| {
+                format!(
+                    "unknown plugins.policy '{}': expected 'auto', 'strict', 'passthrough', or 'force_transform'",
+                    plugin_policy_code
+                )
+            })?;
 
         Ok(Self {
             server: ServerConfig {
@@ -406,12 +477,14 @@ impl RuntimeConfig {
                 port,
                 max_body_size_mb,
             },
-            auth: AuthConfig { mode: auth_mode, api_keys: toml_config.auth.api_keys.clone() },
             storage: StorageConfig {
                 database_url,
                 encryption_secret,
             },
-            logging: LoggingConfig { level: log_level, format: log_format },
+            logging: LoggingConfig {
+                level: log_level,
+                format: log_format,
+            },
             base_paths,
             upstreams,
             fallback: FallbackConfig {
@@ -430,14 +503,37 @@ impl RuntimeConfig {
                     toml_config.cors.allowed_origins.clone()
                 },
             },
-            routing: RoutingConfig {
-                strategy: match toml_config.routing.strategy.as_deref().unwrap_or("priority") {
-                    "round_robin" => sdkwork_lr_core::RoutingStrategy::RoundRobin,
-                    "random" => sdkwork_lr_core::RoutingStrategy::Random,
-                    "least_latency" => sdkwork_lr_core::RoutingStrategy::LeastLatency,
-                    "priority" => sdkwork_lr_core::RoutingStrategy::Priority,
-                    other => return Err(format!("unknown routing.strategy '{}': expected 'priority', 'round_robin', 'random', or 'least_latency'", other)),
-                },
+            routing: {
+                let strategy_code = toml_config
+                    .routing
+                    .strategy
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                let strategy_explicit = strategy_code
+                    .map(|value| !value.eq_ignore_ascii_case("auto"))
+                    .unwrap_or(false);
+                let strategy = match strategy_code.map(|value| value.to_ascii_lowercase()) {
+                    Some(value) if value == "auto" => {
+                        default_routing_strategy_for_account_count(upstream_count)
+                    }
+                    Some(value) if value == "round_robin" || value == "roundrobin" => {
+                        sdkwork_lr_core::RoutingStrategy::RoundRobin
+                    }
+                    Some(value) if value == "random" => sdkwork_lr_core::RoutingStrategy::Random,
+                    Some(value) if value == "least_latency" || value == "leastlatency" => {
+                        sdkwork_lr_core::RoutingStrategy::LeastLatency
+                    }
+                    Some(value) if value == "priority" => {
+                        sdkwork_lr_core::RoutingStrategy::Priority
+                    }
+                    Some(other) => return Err(format!("unknown routing.strategy '{}': expected 'auto', 'priority', 'round_robin', 'random', or 'least_latency'", other)),
+                    None => default_routing_strategy_for_account_count(upstream_count),
+                };
+                RoutingConfig {
+                    strategy,
+                    strategy_explicit,
+                }
             },
             recording: RecordingConfig {
                 save_request_body: toml_config.recording.save_request_body.unwrap_or(false),
@@ -447,13 +543,27 @@ impl RuntimeConfig {
             circuit_breaker: CircuitBreakerConfig {
                 failure_threshold: toml_config.circuit_breaker.failure_threshold.unwrap_or(5),
                 success_threshold: toml_config.circuit_breaker.success_threshold.unwrap_or(3),
-                open_duration: Duration::from_secs(toml_config.circuit_breaker.open_duration_secs.unwrap_or(60)),
-                half_open_max_requests: toml_config.circuit_breaker.half_open_max_requests.unwrap_or(2),
+                open_duration: Duration::from_secs(
+                    toml_config.circuit_breaker.open_duration_secs.unwrap_or(60),
+                ),
+                half_open_max_requests: toml_config
+                    .circuit_breaker
+                    .half_open_max_requests
+                    .unwrap_or(2),
             },
             health_probe: HealthProbeConfig {
                 enabled: toml_config.health_probe.enabled.unwrap_or(true),
                 interval_secs: health_interval,
                 probe_timeout_secs: probe_timeout,
+            },
+            plugins: PluginConfig {
+                enabled: env_bool("SDKWORK_LR_PLUGINS_ENABLED")
+                    .or(toml_config.plugins.enabled)
+                    .unwrap_or(true),
+                policy: plugin_policy,
+                expose_decision_headers: env_bool("SDKWORK_LR_PLUGIN_DECISION_HEADERS")
+                    .or(toml_config.plugins.expose_decision_headers)
+                    .unwrap_or(true),
             },
             config_file_path: None,
         })
@@ -491,15 +601,30 @@ impl RuntimeConfig {
 }
 
 fn env_optional(name: &str) -> Option<String> {
-    std::env::var(name).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
 }
 
 fn config_value(env_name: &str, config_value: Option<&str>) -> Option<String> {
-    env_optional(env_name).or_else(|| config_value.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()))
+    env_optional(env_name).or_else(|| {
+        config_value
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+    })
 }
 
 fn env_u16(name: &str) -> Option<u16> {
     env_optional(name).and_then(|v| v.parse::<u16>().ok())
+}
+
+fn env_bool(name: &str) -> Option<bool> {
+    env_optional(name).and_then(|v| match v.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    })
 }
 
 fn resolve_env_or_value(value: Option<&str>) -> Option<String> {
@@ -532,5 +657,147 @@ fn resolve_env_or_value(value: Option<&str>) -> Option<String> {
         }
     } else {
         Some(trimmed.to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sdkwork_lr_plugin::PluginPolicy;
+
+    fn upstream(name: &str) -> UpstreamSectionConfig {
+        UpstreamSectionConfig {
+            name: name.to_owned(),
+            provider: "openai".to_owned(),
+            base_url: format!("https://{name}.example/v1"),
+            upstream_api_key: Some("sk-test".to_owned()),
+            models: vec!["*".to_owned()],
+            priority: Some(10),
+            timeout_secs: None,
+            max_retries: None,
+            retry_delay_ms: None,
+            anthropic_version: None,
+            default_headers: BTreeMap::new(),
+            model_aliases: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn plugin_config_defaults_to_auto_enabled_with_decision_headers() {
+        let config = RuntimeConfig::from_toml(&RuntimeTomlConfig::default()).unwrap();
+
+        assert!(config.plugins.enabled);
+        assert_eq!(config.plugins.policy, PluginPolicy::Auto);
+        assert!(config.plugins.expose_decision_headers);
+    }
+
+    #[test]
+    fn routing_defaults_to_priority_for_single_upstream() {
+        let toml_config = RuntimeTomlConfig {
+            upstreams: vec![upstream("primary")],
+            ..RuntimeTomlConfig::default()
+        };
+
+        let config = RuntimeConfig::from_toml(&toml_config).unwrap();
+
+        assert_eq!(
+            config.routing.strategy,
+            sdkwork_lr_core::RoutingStrategy::Priority
+        );
+    }
+
+    #[test]
+    fn routing_defaults_to_round_robin_for_multiple_upstreams() {
+        let toml_config = RuntimeTomlConfig {
+            upstreams: vec![upstream("primary"), upstream("secondary")],
+            ..RuntimeTomlConfig::default()
+        };
+
+        let config = RuntimeConfig::from_toml(&toml_config).unwrap();
+
+        assert_eq!(
+            config.routing.strategy,
+            sdkwork_lr_core::RoutingStrategy::RoundRobin
+        );
+    }
+
+    #[test]
+    fn explicit_routing_strategy_overrides_multi_account_default() {
+        let mut toml_config = RuntimeTomlConfig {
+            upstreams: vec![upstream("primary"), upstream("secondary")],
+            ..RuntimeTomlConfig::default()
+        };
+        toml_config.routing.strategy = Some("priority".to_owned());
+
+        let config = RuntimeConfig::from_toml(&toml_config).unwrap();
+
+        assert_eq!(
+            config.routing.strategy,
+            sdkwork_lr_core::RoutingStrategy::Priority
+        );
+    }
+
+    #[test]
+    fn routing_auto_strategy_uses_account_count_default() {
+        let mut toml_config = RuntimeTomlConfig {
+            upstreams: vec![upstream("primary"), upstream("secondary")],
+            ..RuntimeTomlConfig::default()
+        };
+        toml_config.routing.strategy = Some("auto".to_owned());
+
+        let config = RuntimeConfig::from_toml(&toml_config).unwrap();
+
+        assert!(!config.routing.strategy_explicit);
+        assert_eq!(
+            config.routing.strategy,
+            sdkwork_lr_core::RoutingStrategy::RoundRobin
+        );
+    }
+
+    #[test]
+    fn plugin_config_parses_strict_policy_and_header_toggle() {
+        let toml_config: RuntimeTomlConfig = toml::from_str(
+            r#"
+            [plugins]
+            enabled = true
+            policy = "strict"
+            expose_decision_headers = false
+            "#,
+        )
+        .unwrap();
+
+        let config = RuntimeConfig::from_toml(&toml_config).unwrap();
+
+        assert!(config.plugins.enabled);
+        assert_eq!(config.plugins.policy, PluginPolicy::Strict);
+        assert!(!config.plugins.expose_decision_headers);
+    }
+
+    #[test]
+    fn plugin_config_rejects_unknown_policy() {
+        let toml_config: RuntimeTomlConfig = toml::from_str(
+            r#"
+            [plugins]
+            policy = "legacy-shim"
+            "#,
+        )
+        .unwrap();
+
+        let error = RuntimeConfig::from_toml(&toml_config).unwrap_err();
+
+        assert!(error.contains("unknown plugins.policy"));
+    }
+
+    #[test]
+    fn config_rejects_legacy_auth_section() {
+        let error = RuntimeTomlConfig::from_str_strict(
+            r#"
+            [auth]
+            mode = "legacy"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("unknown field `auth`"));
     }
 }

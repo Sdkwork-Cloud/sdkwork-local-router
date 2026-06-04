@@ -8,8 +8,8 @@ pub struct TracingConfig {
 }
 
 pub fn init_tracing(config: &TracingConfig) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&config.level));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.level));
 
     if config.json_format {
         fmt().json().with_env_filter(filter).init();

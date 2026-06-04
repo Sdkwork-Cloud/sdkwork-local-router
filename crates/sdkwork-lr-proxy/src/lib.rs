@@ -1,4 +1,4 @@
-﻿use axum::http::header::{self, HeaderName, HeaderValue};
+use axum::http::header::{self, HeaderName, HeaderValue};
 use axum::http::{HeaderMap, Method, Uri};
 use axum::response::Response;
 use bytes::Bytes;
@@ -40,7 +40,6 @@ pub fn build_proxy_client() -> ProxyClient {
         .with_webpki_roots()
         .https_only()
         .enable_http1()
-        .enable_http2()
         .build();
     Client::builder(TokioExecutor::new()).build(connector)
 }
@@ -53,7 +52,15 @@ pub async fn forward_to_target(
     target: &ForwardTarget,
     upstream_path_and_query: &str,
 ) -> Result<Response, String> {
-    let upstream_response = forward_raw(client, method, original_headers, body, target, upstream_path_and_query).await?;
+    let upstream_response = forward_raw(
+        client,
+        method,
+        original_headers,
+        body,
+        target,
+        upstream_path_and_query,
+    )
+    .await?;
     Ok(upstream_to_axum_response(upstream_response))
 }
 
@@ -107,17 +114,13 @@ pub async fn forward_raw(
     let response_future = client.request(upstream_request);
 
     match target.timeout {
-        Some(timeout) => {
-            tokio::time::timeout(timeout, response_future)
-                .await
-                .map_err(|_| format!("upstream request timed out after {}s", timeout.as_secs()))?
-                .map_err(|e| format!("upstream request failed: {e}"))
-        }
-        None => {
-            response_future
-                .await
-                .map_err(|e| format!("upstream request failed: {e}"))
-        }
+        Some(timeout) => tokio::time::timeout(timeout, response_future)
+            .await
+            .map_err(|_| format!("upstream request timed out after {}s", timeout.as_secs()))?
+            .map_err(|e| format!("upstream request failed: {e}")),
+        None => response_future
+            .await
+            .map_err(|e| format!("upstream request failed: {e}")),
     }
 }
 
@@ -126,11 +129,19 @@ fn build_upstream_uri(target: &ForwardTarget, path_and_query: &str) -> Result<Ur
     let uri_str = match &target.auth {
         Some(AuthInjection::Query(key, value)) => {
             let separator = if base.contains('?') { "&" } else { "?" };
-            format!("{}{}{}={}", base, separator, urlencoding::encode(key), urlencoding::encode(value))
+            format!(
+                "{}{}{}={}",
+                base,
+                separator,
+                urlencoding::encode(key),
+                urlencoding::encode(value)
+            )
         }
         _ => base,
     };
-    uri_str.parse::<Uri>().map_err(|e| format!("invalid upstream URI: {e}"))
+    uri_str
+        .parse::<Uri>()
+        .map_err(|e| format!("invalid upstream URI: {e}"))
 }
 
 fn apply_auth(
@@ -146,8 +157,8 @@ fn apply_auth(
         AuthInjection::Header(name, value) => {
             let header_name = HeaderName::from_bytes(name.as_bytes())
                 .map_err(|e| format!("invalid auth header name: {e}"))?;
-            let header_value =
-                HeaderValue::from_str(value).map_err(|e| format!("invalid auth header value: {e}"))?;
+            let header_value = HeaderValue::from_str(value)
+                .map_err(|e| format!("invalid auth header value: {e}"))?;
             Ok(builder.header(header_name, header_value))
         }
         AuthInjection::Query(_, _) => Ok(builder),
@@ -197,8 +208,14 @@ fn should_forward_response_header(
 fn is_hop_by_hop_header(name: &HeaderName) -> bool {
     matches!(
         name.as_str(),
-        "connection" | "keep-alive" | "proxy-authenticate" | "proxy-authorization"
-            | "te" | "trailer" | "transfer-encoding" | "upgrade"
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
     )
 }
 

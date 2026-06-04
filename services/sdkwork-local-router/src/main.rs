@@ -1,13 +1,17 @@
-﻿use anyhow::Result;
+use anyhow::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config_path = std::env::var("SDKWORK_LR_CONFIG_FILE").ok().filter(|s| !s.trim().is_empty());
+    let config_path = std::env::var("SDKWORK_LR_CONFIG_FILE")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
 
     let mut config = sdkwork_local_router::load_config(config_path.as_deref())?;
 
     if config.storage.database_url.starts_with("sqlite:") {
-        let db_path = config.storage.database_url
+        let db_path = config
+            .storage
+            .database_url
             .strip_prefix("sqlite:")
             .unwrap_or(&config.storage.database_url)
             .split('?')
@@ -39,12 +43,18 @@ async fn main() -> Result<()> {
     sdkwork_lr_observability::init_tracing(&log_config);
     sdkwork_lr_observability::metrics::init_metrics();
 
-    tracing::info!("starting sdkwork-local-router v{}", env!("CARGO_PKG_VERSION"));
+    tracing::info!(
+        "starting sdkwork-local-router v{}",
+        env!("CARGO_PKG_VERSION")
+    );
     tracing::info!(bind = %config.bind_addr(), "listen address");
     tracing::info!(upstreams = config.upstreams.len(), "configured upstreams");
-    tracing::info!(auth_mode = ?config.auth.mode, "authentication mode");
+    tracing::info!("proxy authentication uses database-backed client API keys");
     tracing::info!(fallback_enabled = config.fallback.enabled, "fallback");
-    tracing::info!(rate_limit_enabled = config.rate_limit.enabled, "rate limiting");
+    tracing::info!(
+        rate_limit_enabled = config.rate_limit.enabled,
+        "rate limiting"
+    );
 
     for upstream in &config.upstreams {
         tracing::info!(
@@ -53,13 +63,9 @@ async fn main() -> Result<()> {
             base_url = %upstream.base_url,
             models = ?upstream.models,
             priority = upstream.priority,
-            api_key_configured = !upstream.api_key.is_empty(),
+            upstream_api_key_configured = !upstream.upstream_api_key.is_empty(),
             "upstream configured"
         );
-    }
-
-    if config.auth.mode == sdkwork_lr_config::AuthMode::StaticKey && config.auth.api_keys.is_empty() {
-        tracing::warn!("auth mode is static-key but no api_keys configured - all requests will be denied");
     }
 
     if config.upstreams.is_empty() {

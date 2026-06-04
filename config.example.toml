@@ -1,21 +1,29 @@
-﻿[server]
+[server]
 bind = "127.0.0.1"
 port = 8080
 max_body_size_mb = 50
 
-[auth]
-mode = "none"
-api_keys = []
-
 [storage]
 database_url = "sqlite:./data/local-router.db?mode=rwc"
+# Encrypts upstream API keys stored in local_router_upstream_accounts.
+# Client API keys are stored as hashes in local_router_client_api_keys.
 # encryption_secret = "change-me-to-a-strong-secret"  # Or set SDKWORK_LR_ENCRYPTION_SECRET env var
+
+# Local authentication is not configured in TOML. Proxy/OpenAI/Claude/Gemini-compatible
+# requests authenticate with a database-backed client API key created through
+# /backend/v3/api/router/client_api_keys.
+# The client API key row carries user_id; an empty user context defaults to 0.
+# App/backend APIs resolve user_id from SDKWork auth/access tokens or JWT context.
 
 [logging]
 level = "info"
 format = "text"
 
 [base_paths]
+# local-router-open-api provider-compatible proxy prefixes.
+# Codex/OpenAI-compatible clients use openai, Claude Code-compatible clients use
+# anthropic, and Gemini-compatible clients use google. These paths are grouped
+# as local-router-open-api at runtime and authenticated by client_api_key.
 openai = "/v1"
 anthropic = "/anthropic"
 google = "/google"
@@ -33,7 +41,21 @@ window_secs = 60
 allowed_origins = ["http://localhost:*"]
 
 [routing]
-strategy = "priority"
+# Optional. Use "auto" or omit the key for priority on single-account pools
+# and round_robin on multi-account pools. Explicit values override this per
+# resolved user account pool.
+strategy = "round_robin"
+
+[plugins]
+# enabled=false keeps the original client API surface and only applies model aliases.
+enabled = true
+# auto: use sdkwork-models vendor/model metadata to choose the target API surface.
+# strict: same as auto, but request transform failures return 400 instead of forwarding the original body.
+# passthrough: disable body/path API conversion while preserving model aliases.
+# force_transform: ignore model catalog target surface and convert to the selected upstream provider surface.
+policy = "auto"
+# Expose x-sdkwork-plugin-* decision headers on proxied responses for IDE/tool diagnostics.
+expose_decision_headers = true
 
 [recording]
 save_request_body = false
@@ -55,7 +77,9 @@ probe_timeout_secs = 10
 name = "openai-direct"
 provider = "openai"
 base_url = "https://api.openai.com/v1"
-api_key = ""
+# Upstream provider credential only. It must never be used as a local-router
+# client identity credential.
+upstream_api_key = ""
 models = ["gpt-4o*", "gpt-4*", "o3*", "o4*"]
 priority = 10
 timeout_secs = 120
@@ -69,7 +93,7 @@ retry_delay_ms = 500
 name = "claude-direct"
 provider = "anthropic"
 base_url = "https://api.anthropic.com"
-api_key = ""
+upstream_api_key = ""
 models = ["claude-*"]
 priority = 10
 timeout_secs = 120
@@ -82,7 +106,7 @@ anthropic_version = "2023-06-01"
 name = "gemini-direct"
 provider = "google"
 base_url = "https://generativelanguage.googleapis.com"
-api_key = ""
+upstream_api_key = ""
 models = ["gemini-*"]
 priority = 10
 timeout_secs = 120
@@ -91,7 +115,7 @@ timeout_secs = 120
 name = "openai-compatible-proxy"
 provider = "openai"
 base_url = "https://your-proxy.example.com/v1"
-api_key = ""
+upstream_api_key = ""
 models = ["*"]
 priority = 100
 timeout_secs = 180

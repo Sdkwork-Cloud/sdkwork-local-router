@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -18,13 +18,14 @@ use sdkwork_lr_store::Store;
 pub async fn serve(config: RuntimeConfig) -> Result<()> {
     let encryption = sdkwork_lr_store::KeyEncryption::new(&config.storage.encryption_secret);
     if encryption.is_enabled() {
-        tracing::info!("API key encryption enabled");
+        tracing::info!("upstream API key encryption enabled");
     } else {
-        tracing::warn!("API key encryption disabled - keys stored in plaintext");
+        tracing::warn!("upstream API key encryption disabled - keys stored in plaintext");
     }
 
     let store = Store::with_encryption(&config.storage.database_url, encryption)
-        .await.map_err(anyhow::Error::msg)?;
+        .await
+        .map_err(anyhow::Error::msg)?;
     store.run_migrations().await.map_err(anyhow::Error::msg)?;
 
     let rate_limiter = Arc::new(RateLimiter::new(
@@ -35,19 +36,31 @@ pub async fn serve(config: RuntimeConfig) -> Result<()> {
     let shutdown_token = Arc::new(AtomicBool::new(false));
 
     if config.rate_limit.enabled {
-        spawn_rate_limit_cleanup(rate_limiter.clone(), config.rate_limit.window_secs, shutdown_token.clone());
+        spawn_rate_limit_cleanup(
+            rate_limiter.clone(),
+            config.rate_limit.window_secs,
+            shutdown_token.clone(),
+        );
     }
 
     let cleanup_store = store.clone();
     let cleanup_retention_days = config.recording.retention_days;
-    spawn_invocation_cleanup(cleanup_store, cleanup_retention_days, shutdown_token.clone());
+    spawn_invocation_cleanup(
+        cleanup_store,
+        cleanup_retention_days,
+        shutdown_token.clone(),
+    );
 
-    let (app, health_manager, pool_arc) = router::build_router(&config, store, rate_limiter).await?;
+    let (app, health_manager, pool_arc, routing_strategy_overrides) =
+        router::build_router(&config, store.clone(), rate_limiter).await?;
 
     if config.health_probe.enabled {
         let probe_accounts: Vec<Account> = {
             let pool = pool_arc.read();
-            pool.enabled_accounts_arc().into_iter().map(|a| (*a).clone()).collect()
+            pool.enabled_accounts_arc()
+                .into_iter()
+                .map(|a| (*a).clone())
+                .collect()
         };
         let probe_client = sdkwork_lr_proxy::build_proxy_client();
         spawn_health_probe(
@@ -63,6 +76,7 @@ pub async fn serve(config: RuntimeConfig) -> Result<()> {
         spawn_config_watcher(
             config_path.clone(),
             pool_arc.clone(),
+            routing_strategy_overrides,
             store.clone(),
             shutdown_token.clone(),
         );
@@ -83,7 +97,11 @@ pub async fn serve(config: RuntimeConfig) -> Result<()> {
     Ok(())
 }
 
-fn spawn_rate_limit_cleanup(limiter: Arc<RateLimiter>, window_secs: u64, shutdown: Arc<AtomicBool>) {
+fn spawn_rate_limit_cleanup(
+    limiter: Arc<RateLimiter>,
+    window_secs: u64,
+    shutdown: Arc<AtomicBool>,
+) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(window_secs * 2));
         loop {
@@ -108,7 +126,11 @@ fn spawn_invocation_cleanup(store: Store, retention_days: i64, shutdown: Arc<Ato
             match store.cleanup_invocations(retention_days).await {
                 Ok(deleted) => {
                     if deleted > 0 {
-                        tracing::info!(deleted = deleted, retention_days = retention_days, "cleaned up old invocations");
+                        tracing::info!(
+                            deleted = deleted,
+                            retention_days = retention_days,
+                            "cleaned up old invocations"
+                        );
                     }
                 }
                 Err(e) => {
@@ -123,6 +145,7 @@ fn spawn_invocation_cleanup(store: Store, retention_days: i64, shutdown: Arc<Ato
 fn spawn_config_watcher(
     config_path: String,
     pool_arc: Arc<RwLock<sdkwork_lr_core::AccountPool>>,
+    routing_strategy_overrides: router::RoutingStrategyOverrides,
     store: Store,
     shutdown: Arc<AtomicBool>,
 ) {
@@ -145,6 +168,7 @@ fn spawn_config_watcher(
         tracing::info!(path = %path, "config file watcher started");
     });
 
+    let store_for_reload = store.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(CONFIG_CHECK_INTERVAL_SECS));
         loop {
@@ -155,7 +179,8 @@ fn spawn_config_watcher(
 
             let current_mtime = match std::fs::metadata(&config_path) {
                 Ok(meta) => match meta.modified() {
-                    Ok(t) => t.duration_since(std::time::UNIX_EPOCH)
+                    Ok(t) => t
+                        .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
                         .unwrap_or(0),
                     Err(_) => continue,
@@ -175,28 +200,64 @@ fn spawn_config_watcher(
                 Ok(toml_config) => {
                     match sdkwork_lr_config::RuntimeConfig::from_toml(&toml_config) {
                         Ok(new_config) => {
-                            let accounts: Vec<Account> = new_config.upstreams.iter().map(|u| Account {
-                                name: u.name.clone(),
-                                provider: u.provider.clone(),
-                                base_url: u.base_url.clone(),
-                                api_key: u.api_key.clone(),
-                                models: u.models.clone(),
-                                priority: u.priority,
-                                timeout: u.timeout,
-                                max_retries: u.max_retries,
-                                retry_delay_ms: u.retry_delay_ms,
-                                anthropic_version: u.anthropic_version.clone(),
-                                default_headers: u.default_headers.clone(),
-                                enabled: true,
-                                model_aliases: u.model_aliases.clone(),
-                            }).collect();
+                            let accounts: Vec<Account> = new_config
+                                .upstreams
+                                .iter()
+                                .map(|u| Account {
+                                    name: u.name.clone(),
+                                    provider: u.provider.clone(),
+                                    base_url: u.base_url.clone(),
+                                    upstream_api_key: u.upstream_api_key.clone(),
+                                    models: u.models.clone(),
+                                    priority: u.priority,
+                                    timeout: u.timeout,
+                                    max_retries: u.max_retries,
+                                    retry_delay_ms: u.retry_delay_ms,
+                                    anthropic_version: u.anthropic_version.clone(),
+                                    default_headers: u.default_headers.clone(),
+                                    enabled: true,
+                                    model_aliases: u.model_aliases.clone(),
+                                })
+                                .collect();
 
-                            let (strategy, health_manager) = {
+                            // Persist to store (best-effort, log on failure)
+                            for acc in &accounts {
+                                let new_account = sdkwork_lr_store::NewAccount {
+                                    user_id: sdkwork_lr_store::DEFAULT_USER_ID,
+                                    name: acc.name.clone(),
+                                    provider: format!("{:?}", acc.provider),
+                                    base_url: acc.base_url.clone(),
+                                    upstream_api_key: acc.upstream_api_key.clone(),
+                                    models: acc.models.clone(),
+                                    priority: acc.priority as i32,
+                                    timeout_secs: acc.timeout.as_secs() as i64,
+                                    max_retries: acc.max_retries as i32,
+                                    retry_delay_ms: acc.retry_delay_ms as i64,
+                                    anthropic_version: acc.anthropic_version.clone(),
+                                    default_headers: acc.default_headers.clone(),
+                                    model_aliases: acc.model_aliases.clone(),
+                                    enabled: acc.enabled,
+                                };
+                                let _ = store_for_reload.upsert_account(&new_account).await;
+                            }
+
+                            let health_manager = {
                                 let pool = pool_arc.read();
-                                (pool.strategy(), pool.health_manager().clone())
+                                pool.health_manager().clone()
                             };
+                            let strategy = routing_strategy_overrides
+                                .read()
+                                .get(&sdkwork_lr_store::DEFAULT_USER_ID)
+                                .copied()
+                                .unwrap_or_else(|| {
+                                    new_config
+                                        .routing
+                                        .strategy_for_account_count(accounts.len())
+                                });
                             let new_pool = sdkwork_lr_core::AccountPool::with_health_manager(
-                                accounts, strategy, health_manager,
+                                accounts,
+                                strategy,
+                                health_manager,
                             );
                             *pool_arc.write() = new_pool;
                             tracing::info!("account pool hot-reloaded from config file");
@@ -222,12 +283,10 @@ fn spawn_health_probe(
     client: ProxyClient,
     shutdown: Arc<AtomicBool>,
 ) {
-    use sdkwork_lr_proxy::{AuthInjection, ForwardTarget};
     use std::collections::HashMap;
 
-    let account_map: HashMap<String, Account> = accounts.into_iter()
-        .map(|a| (a.name.clone(), a))
-        .collect();
+    let account_map: HashMap<String, Account> =
+        accounts.into_iter().map(|a| (a.name.clone(), a)).collect();
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
@@ -237,7 +296,8 @@ fn spawn_health_probe(
             }
             interval.tick().await;
             let snapshots = health_manager.snapshots();
-            let unhealthy: Vec<_> = snapshots.iter()
+            let unhealthy: Vec<_> = snapshots
+                .iter()
                 .filter(|s| s.state != HealthState::Healthy)
                 .collect();
 
@@ -298,19 +358,27 @@ fn spawn_health_probe(
 enum ProbeResult {
     Reachable,
     Unreachable(String),
+    #[allow(dead_code)]
     Skipped,
 }
 
-fn probe_account(client: &ProxyClient, account: &Account) -> std::pin::Pin<Box<dyn std::future::Future<Output = ProbeResult> + Send + '_>> {
+fn probe_account<'a>(
+    client: &'a ProxyClient,
+    account: &'a Account,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ProbeResult> + Send + 'a>> {
     Box::pin(async move {
         let auth = build_probe_auth(account);
         let probe_path = build_probe_path(account);
 
-        let target = ForwardTarget {
+        let target = sdkwork_lr_proxy::ForwardTarget {
             base_url: account.base_url.clone(),
             auth,
-            default_headers: account.default_headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-            anthropic_version: account.anthropic_version.clone(),
+            default_headers: account
+                .default_headers
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            anthropic_version: effective_probe_anthropic_version(account),
             timeout: Some(account.timeout),
             request_id: "health-probe".to_owned(),
         };
@@ -325,7 +393,8 @@ fn probe_account(client: &ProxyClient, account: &Account) -> std::pin::Pin<Box<d
             bytes::Bytes::new(),
             target_ref,
             path_ref,
-        ).await;
+        )
+        .await;
 
         match result {
             Ok(response) => {
@@ -345,15 +414,23 @@ fn probe_account(client: &ProxyClient, account: &Account) -> std::pin::Pin<Box<d
     })
 }
 
-
-
-fn build_probe_auth(account: &Account) -> Option<AuthInjection> {
+fn build_probe_auth(account: &Account) -> Option<sdkwork_lr_proxy::AuthInjection> {
     use sdkwork_lr_core::ProviderKind;
-    if account.api_key.is_empty() { return None; }
+    if account.upstream_api_key.is_empty() {
+        return None;
+    }
     match account.provider {
-        ProviderKind::Openai | ProviderKind::Custom(_) => Some(AuthInjection::Bearer(account.api_key.clone())),
-        ProviderKind::Anthropic => Some(AuthInjection::Header("x-api-key".to_owned(), account.api_key.clone())),
-        ProviderKind::Google => Some(AuthInjection::Header("x-goog-api-key".to_owned(), account.api_key.clone())),
+        ProviderKind::Openai | ProviderKind::Custom(_) => Some(
+            sdkwork_lr_proxy::AuthInjection::Bearer(account.upstream_api_key.clone()),
+        ),
+        ProviderKind::Anthropic => Some(sdkwork_lr_proxy::AuthInjection::Header(
+            "x-api-key".to_owned(),
+            account.upstream_api_key.clone(),
+        )),
+        ProviderKind::Google => Some(sdkwork_lr_proxy::AuthInjection::Header(
+            "x-goog-api-key".to_owned(),
+            account.upstream_api_key.clone(),
+        )),
     }
 }
 
@@ -363,6 +440,19 @@ fn build_probe_path(account: &Account) -> String {
         ProviderKind::Openai | ProviderKind::Custom(_) => "/v1/models".to_owned(),
         ProviderKind::Anthropic => "/v1/models".to_owned(),
         ProviderKind::Google => "/v1/models".to_owned(),
+    }
+}
+
+fn effective_probe_anthropic_version(account: &Account) -> Option<String> {
+    match account.provider {
+        sdkwork_lr_core::ProviderKind::Anthropic => account
+            .anthropic_version
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .or_else(|| Some("2023-06-01".to_owned())),
+        _ => account.anthropic_version.clone(),
     }
 }
 
@@ -397,5 +487,35 @@ async fn shutdown_signal(_shutdown_token: Arc<AtomicBool>) {
         _ = terminate => {
             tracing::info!("received terminate signal, shutting down gracefully");
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn anthropic_probe_uses_default_messages_api_version_when_unset() {
+        let account = Account {
+            name: "claude".to_owned(),
+            provider: sdkwork_lr_core::ProviderKind::Anthropic,
+            base_url: "https://api.anthropic.com".to_owned(),
+            upstream_api_key: "sk-ant".to_owned(),
+            models: vec!["claude-*".to_owned()],
+            priority: 10,
+            timeout: Duration::from_secs(30),
+            max_retries: 0,
+            retry_delay_ms: 500,
+            anthropic_version: None,
+            default_headers: BTreeMap::new(),
+            enabled: true,
+            model_aliases: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            effective_probe_anthropic_version(&account).as_deref(),
+            Some("2023-06-01")
+        );
     }
 }

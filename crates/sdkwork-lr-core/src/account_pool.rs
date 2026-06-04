@@ -8,10 +8,11 @@ use std::time::Duration;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use crate::ProviderKind;
 use crate::health::HealthManager;
+use crate::ProviderKind;
 
-static REGEX_CACHE: LazyLock<parking_lot::Mutex<std::collections::HashMap<String, regex::Regex>>> = LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+static REGEX_CACHE: LazyLock<parking_lot::Mutex<std::collections::HashMap<String, regex::Regex>>> =
+    LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
 
 mod duration_secs {
     use serde::{self, Deserialize, Deserializer, Serializer};
@@ -48,7 +49,7 @@ pub struct Account {
     pub provider: ProviderKind,
     pub base_url: String,
     #[serde(skip_serializing, default)]
-    pub api_key: String,
+    pub upstream_api_key: String,
     pub models: Vec<String>,
     pub priority: u32,
     #[serde(with = "duration_secs")]
@@ -62,9 +63,11 @@ pub struct Account {
     pub model_aliases: BTreeMap<String, String>,
 }
 
-fn default_retry_delay() -> u64 { 500 }
+fn default_retry_delay() -> u64 {
+    500
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct AccountState {
     account: Arc<Account>,
     total_requests: AtomicU64,
@@ -82,7 +85,9 @@ pub struct AccountPool {
 
 impl AccountPool {
     fn build_name_index(accounts: &[AccountState]) -> HashMap<String, usize> {
-        accounts.iter().enumerate()
+        accounts
+            .iter()
+            .enumerate()
             .map(|(i, s)| (s.account.name.clone(), i))
             .collect()
     }
@@ -93,11 +98,14 @@ impl AccountPool {
 
     pub fn with_strategy(accounts: Vec<Account>, strategy: RoutingStrategy) -> Self {
         let health_manager = Arc::new(HealthManager::new(Default::default()));
-        let states: Vec<AccountState> = accounts.iter().map(|a| AccountState {
-            account: Arc::new(a.clone()),
-            total_requests: AtomicU64::new(0),
-            total_latency_ms: AtomicU64::new(0),
-        }).collect();
+        let states: Vec<AccountState> = accounts
+            .iter()
+            .map(|a| AccountState {
+                account: Arc::new(a.clone()),
+                total_requests: AtomicU64::new(0),
+                total_latency_ms: AtomicU64::new(0),
+            })
+            .collect();
         health_manager.register_all(&accounts.iter().map(|a| a.name.clone()).collect::<Vec<_>>());
         let name_index = Self::build_name_index(&states);
         Self {
@@ -109,12 +117,19 @@ impl AccountPool {
         }
     }
 
-    pub fn with_health_manager(accounts: Vec<Account>, strategy: RoutingStrategy, health_manager: Arc<HealthManager>) -> Self {
-        let states: Vec<AccountState> = accounts.iter().map(|a| AccountState {
-            account: Arc::new(a.clone()),
-            total_requests: AtomicU64::new(0),
-            total_latency_ms: AtomicU64::new(0),
-        }).collect();
+    pub fn with_health_manager(
+        accounts: Vec<Account>,
+        strategy: RoutingStrategy,
+        health_manager: Arc<HealthManager>,
+    ) -> Self {
+        let states: Vec<AccountState> = accounts
+            .iter()
+            .map(|a| AccountState {
+                account: Arc::new(a.clone()),
+                total_requests: AtomicU64::new(0),
+                total_latency_ms: AtomicU64::new(0),
+            })
+            .collect();
         health_manager.register_all(&accounts.iter().map(|a| a.name.clone()).collect::<Vec<_>>());
         let name_index = Self::build_name_index(&states);
         Self {
@@ -141,14 +156,16 @@ impl AccountPool {
     }
 
     pub fn enabled_accounts(&self) -> Vec<&Account> {
-        self.accounts.iter()
+        self.accounts
+            .iter()
             .filter(|s| s.account.enabled)
             .map(|s| s.account.as_ref())
             .collect()
     }
 
     pub fn enabled_accounts_arc(&self) -> Vec<Arc<Account>> {
-        self.accounts.iter()
+        self.accounts
+            .iter()
             .filter(|s| s.account.enabled)
             .map(|s| s.account.clone())
             .collect()
@@ -177,79 +194,90 @@ impl AccountPool {
     }
 
     pub fn select(&self, model: &str) -> Option<Arc<Account>> {
-        let current_strategy = *self.strategy.read();
-        let matched: Vec<&AccountState> = self.accounts.iter()
-            .filter(|s| {
-                s.account.enabled
-                    && model_matches(model, &s.account.models)
-                    && self.health_manager.is_available(&s.account.name)
-            })
-            .collect();
-
-        if matched.is_empty() {
-            return None;
-        }
-
-        match current_strategy {
-            RoutingStrategy::Priority => {
-                matched.into_iter()
-                    .min_by_key(|s| s.account.priority)
-                    .map(|s| s.account.clone())
-            }
-            RoutingStrategy::RoundRobin => {
-                let count = matched.len();
-                let idx = self.round_robin_counter.fetch_add(1, Ordering::Relaxed) as usize % count;
-                Some(matched[idx].account.clone())
-            }
-            RoutingStrategy::Random => {
-                use rand::Rng;
-                let idx = rand::thread_rng().gen_range(0..matched.len());
-                Some(matched[idx].account.clone())
-            }
-            RoutingStrategy::LeastLatency => {
-                matched.into_iter()
-                    .min_by_key(|s| {
-                        let reqs = s.total_requests.load(Ordering::Relaxed);
-                        if reqs == 0 { return u64::MAX; }
-                        s.total_latency_ms.load(Ordering::Relaxed) / reqs
-                    })
-                    .map(|s| s.account.clone())
-            }
-        }
+        self.select_all(model).into_iter().next()
     }
 
     pub fn select_all(&self, model: &str) -> Vec<Arc<Account>> {
-        let mut matched: Vec<&AccountState> = self.accounts.iter()
-            .filter(|s| {
-                s.account.enabled
-                    && model_matches(model, &s.account.models)
-                    && self.health_manager.is_available(&s.account.name)
-            })
-            .collect();
-        matched.sort_by_key(|s| s.account.priority);
-        matched.into_iter().map(|s| s.account.clone()).collect()
+        let matched = self.available_states(Some(model));
+        self.order_candidates(matched)
+    }
+
+    pub fn select_available_accounts(&self) -> Vec<Arc<Account>> {
+        let matched = self.available_states(None);
+        self.order_candidates(matched)
     }
 
     pub fn record_latency(&self, account_name: &str, latency_ms: u64) {
         if let Some(&idx) = self.name_index.get(account_name) {
             if let Some(state) = self.accounts.get(idx) {
                 state.total_requests.fetch_add(1, Ordering::Relaxed);
-                state.total_latency_ms.fetch_add(latency_ms, Ordering::Relaxed);
+                state
+                    .total_latency_ms
+                    .fetch_add(latency_ms, Ordering::Relaxed);
             }
         }
     }
 
     pub fn reload(&mut self, accounts: Vec<Account>) {
         let names: Vec<String> = accounts.iter().map(|a| a.name.clone()).collect();
-        let states: Vec<AccountState> = accounts.into_iter().map(|a| AccountState {
-            account: Arc::new(a),
-            total_requests: AtomicU64::new(0),
-            total_latency_ms: AtomicU64::new(0),
-        }).collect();
+        let states: Vec<AccountState> = accounts
+            .into_iter()
+            .map(|a| AccountState {
+                account: Arc::new(a),
+                total_requests: AtomicU64::new(0),
+                total_latency_ms: AtomicU64::new(0),
+            })
+            .collect();
         self.health_manager.register_all(&names);
         self.name_index = Arc::new(Self::build_name_index(&states));
         self.accounts = Arc::new(states);
     }
+
+    fn available_states(&self, model: Option<&str>) -> Vec<&AccountState> {
+        self.accounts
+            .iter()
+            .filter(|s| {
+                s.account.enabled
+                    && model.map_or(true, |model| model_matches(model, &s.account.models))
+                    && self.health_manager.is_available(&s.account.name)
+            })
+            .collect()
+    }
+
+    fn order_candidates(&self, mut matched: Vec<&AccountState>) -> Vec<Arc<Account>> {
+        if matched.is_empty() {
+            return Vec::new();
+        }
+
+        let current_strategy = *self.strategy.read();
+        matched.sort_by_key(|s| s.account.priority);
+
+        match current_strategy {
+            RoutingStrategy::Priority => {}
+            RoutingStrategy::RoundRobin => {
+                let idx = self.round_robin_counter.fetch_add(1, Ordering::Relaxed) as usize
+                    % matched.len();
+                matched.rotate_left(idx);
+            }
+            RoutingStrategy::Random => {
+                use rand::seq::SliceRandom;
+                matched.shuffle(&mut rand::thread_rng());
+            }
+            RoutingStrategy::LeastLatency => {
+                matched.sort_by_key(|s| (average_latency_key(s), s.account.priority));
+            }
+        }
+
+        matched.into_iter().map(|s| s.account.clone()).collect()
+    }
+}
+
+fn average_latency_key(state: &AccountState) -> u64 {
+    let reqs = state.total_requests.load(Ordering::Relaxed);
+    if reqs == 0 {
+        return u64::MAX;
+    }
+    state.total_latency_ms.load(Ordering::Relaxed) / reqs
 }
 
 fn model_matches(model: &str, patterns: &[String]) -> bool {
@@ -288,7 +316,7 @@ mod tests {
             name: name.to_owned(),
             provider: ProviderKind::Openai,
             base_url: "https://api.openai.com".to_owned(),
-            api_key: "test-key".to_owned(),
+            upstream_api_key: "test-key".to_owned(),
             models: models.into_iter().map(String::from).collect(),
             priority,
             timeout: Duration::from_secs(30),
@@ -303,10 +331,13 @@ mod tests {
 
     #[test]
     fn test_select_by_priority() {
-        let pool = AccountPool::with_strategy(vec![
-            make_account("low", vec!["gpt-4"], 20),
-            make_account("high", vec!["gpt-4"], 1),
-        ], RoutingStrategy::Priority);
+        let pool = AccountPool::with_strategy(
+            vec![
+                make_account("low", vec!["gpt-4"], 20),
+                make_account("high", vec!["gpt-4"], 1),
+            ],
+            RoutingStrategy::Priority,
+        );
         let selected = pool.select("gpt-4").unwrap();
         assert_eq!(selected.name, "high");
     }
@@ -334,16 +365,42 @@ mod tests {
 
     #[test]
     fn test_select_all_sorted_by_priority() {
-        let pool = AccountPool::with_strategy(vec![
-            make_account("low", vec!["gpt-4"], 30),
-            make_account("mid", vec!["gpt-4"], 20),
-            make_account("high", vec!["gpt-4"], 10),
-        ], RoutingStrategy::Priority);
+        let pool = AccountPool::with_strategy(
+            vec![
+                make_account("low", vec!["gpt-4"], 30),
+                make_account("mid", vec!["gpt-4"], 20),
+                make_account("high", vec!["gpt-4"], 10),
+            ],
+            RoutingStrategy::Priority,
+        );
         let all = pool.select_all("gpt-4");
         assert_eq!(all.len(), 3);
         assert_eq!(all[0].name, "high");
         assert_eq!(all[1].name, "mid");
         assert_eq!(all[2].name, "low");
+    }
+
+    #[test]
+    fn round_robin_select_all_rotates_candidate_order() {
+        let pool = AccountPool::with_strategy(
+            vec![
+                make_account("a", vec!["*"], 30),
+                make_account("b", vec!["*"], 10),
+                make_account("c", vec!["*"], 20),
+            ],
+            RoutingStrategy::RoundRobin,
+        );
+
+        let names = |accounts: Vec<Arc<Account>>| {
+            accounts
+                .into_iter()
+                .map(|account| account.name.clone())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(names(pool.select_all("gpt-4")), vec!["b", "c", "a"]);
+        assert_eq!(names(pool.select_all("gpt-4")), vec!["c", "a", "b"]);
+        assert_eq!(names(pool.select_all("gpt-4")), vec!["a", "b", "c"]);
     }
 
     #[test]
@@ -394,10 +451,13 @@ mod tests {
 
     #[test]
     fn round_robin_strategy() {
-        let pool = AccountPool::with_strategy(vec![
-            make_account("a", vec!["*"], 10),
-            make_account("b", vec!["*"], 10),
-        ], RoutingStrategy::RoundRobin);
+        let pool = AccountPool::with_strategy(
+            vec![
+                make_account("a", vec!["*"], 10),
+                make_account("b", vec!["*"], 10),
+            ],
+            RoutingStrategy::RoundRobin,
+        );
         let first = pool.select("test").unwrap().name.clone();
         let second = pool.select("test").unwrap().name.clone();
         assert_ne!(first, second);
@@ -405,10 +465,13 @@ mod tests {
 
     #[test]
     fn least_latency_strategy() {
-        let pool = AccountPool::with_strategy(vec![
-            make_account("fast", vec!["*"], 10),
-            make_account("slow", vec!["*"], 10),
-        ], RoutingStrategy::LeastLatency);
+        let pool = AccountPool::with_strategy(
+            vec![
+                make_account("fast", vec!["*"], 10),
+                make_account("slow", vec!["*"], 10),
+            ],
+            RoutingStrategy::LeastLatency,
+        );
         pool.record_latency("fast", 100);
         pool.record_latency("slow", 5000);
         assert_eq!(pool.select("test").unwrap().name, "fast");
@@ -418,10 +481,10 @@ mod tests {
     fn account_serialization_roundtrip() {
         let account = make_account("test", vec!["gpt-*"], 10);
         let json = serde_json::to_string(&account).unwrap();
-        assert!(!json.contains("api_key"));
+        assert!(!json.contains("upstream_api_key"));
         let deserialized: Account = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.name, "test");
         assert_eq!(deserialized.timeout, Duration::from_secs(30));
-        assert!(deserialized.api_key.is_empty());
+        assert!(deserialized.upstream_api_key.is_empty());
     }
 }

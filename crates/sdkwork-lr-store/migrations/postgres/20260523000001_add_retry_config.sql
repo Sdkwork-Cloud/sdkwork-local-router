@@ -1,2 +1,4 @@
-ALTER TABLE accounts ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE accounts ADD COLUMN retry_delay_ms INTEGER NOT NULL DEFAULT 500;
+-- Retry configuration is part of the initial local_router_upstream_accounts
+-- schema. This migration version is intentionally retained as a no-op so
+-- existing migration histories remain ordered without reintroducing legacy
+-- unprefixed table names.

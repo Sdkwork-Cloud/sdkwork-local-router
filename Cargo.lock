@@ -390,6 +390,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "errno"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+dependencies = [
+ "libc",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "etcetera"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1444,6 +1454,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "bytes",
  "dashmap",
  "futures-core",
@@ -1455,14 +1466,18 @@ dependencies = [
  "sdkwork-lr-config",
  "sdkwork-lr-core",
  "sdkwork-lr-observability",
+ "sdkwork-lr-plugin",
  "sdkwork-lr-proxy",
  "sdkwork-lr-store",
  "sdkwork-lr-transform",
+ "sdkwork-models",
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tower-http",
  "tracing",
+ "urlencoding",
  "uuid",
 ]
 
@@ -1472,9 +1487,11 @@ version = "0.1.0"
 dependencies = [
  "regex",
  "sdkwork-lr-core",
+ "sdkwork-lr-plugin",
  "serde",
  "serde_json",
  "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -1501,6 +1518,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sdkwork-lr-plugin"
+version = "0.1.0"
+dependencies = [
+ "sdkwork-lr-core",
+ "sdkwork-models",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sdkwork-lr-proxy"
 version = "0.1.0"
 dependencies = [
@@ -1511,7 +1538,9 @@ dependencies = [
  "hyper-rustls",
  "hyper-util",
  "sdkwork-lr-core",
+ "tokio",
  "tracing",
+ "urlencoding",
 ]
 
 [[package]]
@@ -1522,6 +1551,7 @@ dependencies = [
  "anyhow",
  "base64",
  "chrono",
+ "hkdf",
  "rand",
  "serde",
  "serde_json",
@@ -1536,10 +1566,20 @@ name = "sdkwork-lr-transform"
 version = "0.1.0"
 dependencies = [
  "sdkwork-lr-core",
+ "sdkwork-lr-plugin",
  "serde",
  "serde_json",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "sdkwork-models"
+version = "0.1.0"
+source = "git+https://github.com/Sdkwork-Cloud/sdkwork-models.git#9461f8c4b503e085bc4265110fc7363bf31c3718"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1659,6 +1699,16 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "signal-hook-registry"
+version = "1.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+dependencies = [
+ "errno",
+ "libc",
+]
 
 [[package]]
 name = "signature"
@@ -2035,6 +2085,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -2139,6 +2190,7 @@ dependencies = [
  "bytes",
  "http",
  "http-body",
+ "http-body-util",
  "pin-project-lite",
  "tower-layer",
  "tower-service",
@@ -2304,6 +2356,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf8_iter"

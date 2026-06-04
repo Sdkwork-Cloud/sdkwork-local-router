@@ -12,5 +12,6 @@ hyper.workspace = true
 hyper-rustls.workspace = true
 hyper-util.workspace = true
 sdkwork-lr-core = { path = "../sdkwork-lr-core" }
+tokio.workspace = true
 tracing.workspace = true
 urlencoding.workspace = true

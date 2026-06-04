@@ -2,6 +2,7 @@
 members = [
     "crates/sdkwork-lr-config",
     "crates/sdkwork-lr-core",
+    "crates/sdkwork-lr-plugin",
     "crates/sdkwork-lr-proxy",
     "crates/sdkwork-lr-transform",
     "crates/sdkwork-lr-store",
@@ -29,13 +30,15 @@ hyper-rustls = { version = "0.27", default-features = false, features = ["http1"
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 parking_lot = "0.12"
 regex = "1"
+sdkwork-models = { git = "https://github.com/Sdkwork-Cloud/sdkwork-models.git" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "postgres", "derive", "migrate"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "postgres", "derive", "migrate", "macros"] }
 strum = { version = "0.26", features = ["derive"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "fs", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "fs", "io-util", "signal"] }
 toml = "0.8"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 uuid = { version = "1", features = ["v4"] }
