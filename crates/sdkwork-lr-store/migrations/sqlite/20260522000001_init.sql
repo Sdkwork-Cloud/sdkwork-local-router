@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS local_router_upstream_accounts (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  INTEGER PRIMARY KEY,
     user_id             INTEGER NOT NULL DEFAULT 0,
     name                TEXT    NOT NULL,
     provider            TEXT    NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS local_router_upstream_accounts (
 );
 
 CREATE TABLE IF NOT EXISTS local_router_client_api_keys (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  INTEGER PRIMARY KEY,
     user_id             INTEGER NOT NULL DEFAULT 0,
     name                TEXT    NOT NULL,
     key_hash            TEXT    NOT NULL UNIQUE,
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS local_router_client_api_keys (
 );
 
 CREATE TABLE IF NOT EXISTS local_router_invocations (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  INTEGER PRIMARY KEY,
     user_id             INTEGER NOT NULL DEFAULT 0,
     request_id          TEXT    NOT NULL,
     account_name        TEXT,
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS local_router_invocations (
 );
 
 CREATE TABLE IF NOT EXISTS local_router_usages (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  INTEGER PRIMARY KEY,
     user_id             INTEGER NOT NULL DEFAULT 0,
     request_id          TEXT    NOT NULL,
     model               TEXT,

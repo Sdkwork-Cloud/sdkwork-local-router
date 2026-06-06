@@ -1553,6 +1553,7 @@ dependencies = [
  "chrono",
  "hkdf",
  "rand",
+ "sdkwork_id",
  "serde",
  "serde_json",
  "sha2",
@@ -1581,6 +1582,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "sdkwork_id"
+version = "0.1.0"
 
 [[package]]
 name = "semver"

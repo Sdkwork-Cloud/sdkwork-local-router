@@ -1,5 +1,6 @@
 pub mod crypto;
 pub mod error;
+mod id;
 pub mod models;
 pub mod pool;
 

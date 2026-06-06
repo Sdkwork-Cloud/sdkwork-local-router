@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS local_router_upstream_accounts (
-    id                  BIGSERIAL PRIMARY KEY,
+    id                  BIGINT PRIMARY KEY,
     user_id             BIGINT       NOT NULL DEFAULT 0,
     name                VARCHAR(255) NOT NULL,
     provider            VARCHAR(64)  NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS local_router_upstream_accounts (
 );
 
 CREATE TABLE IF NOT EXISTS local_router_client_api_keys (
-    id                  BIGSERIAL PRIMARY KEY,
+    id                  BIGINT PRIMARY KEY,
     user_id             BIGINT       NOT NULL DEFAULT 0,
     name                VARCHAR(255) NOT NULL,
     key_hash            VARCHAR(128) NOT NULL UNIQUE,
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS local_router_client_api_keys (
 );
 
 CREATE TABLE IF NOT EXISTS local_router_invocations (
-    id                  BIGSERIAL PRIMARY KEY,
+    id                  BIGINT PRIMARY KEY,
     user_id             BIGINT       NOT NULL DEFAULT 0,
     request_id          VARCHAR(64)  NOT NULL,
     account_name        VARCHAR(255),
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS local_router_invocations (
 );
 
 CREATE TABLE IF NOT EXISTS local_router_usages (
-    id                  BIGSERIAL PRIMARY KEY,
+    id                  BIGINT PRIMARY KEY,
     user_id             BIGINT       NOT NULL DEFAULT 0,
     request_id          VARCHAR(64)  NOT NULL,
     model               VARCHAR(128),

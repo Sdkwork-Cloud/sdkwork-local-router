@@ -1,0 +1,3 @@
+-- Runtime local_router_* inserts bind Snowflake IDs explicitly.
+-- Existing SQLite INTEGER PRIMARY KEY tables remain compatible; fresh schemas
+-- no longer declare database-side row allocation.

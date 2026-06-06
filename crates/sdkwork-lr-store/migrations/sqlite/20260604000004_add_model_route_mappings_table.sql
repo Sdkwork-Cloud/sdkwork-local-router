@@ -1,7 +1,7 @@
 CREATE UNIQUE INDEX IF NOT EXISTS idx_local_router_upstream_accounts_user_id ON local_router_upstream_accounts(user_id, id);
 
 CREATE TABLE IF NOT EXISTS local_router_model_route_mappings (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    id                  INTEGER PRIMARY KEY,
     user_id             INTEGER NOT NULL DEFAULT 0,
     account_id          INTEGER NOT NULL,
     account_name        TEXT    NOT NULL,

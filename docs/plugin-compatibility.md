@@ -17,6 +17,26 @@ implementations live in `sdkwork-lr-transform`.
   `https://github.com/Sdkwork-Cloud/sdkwork-models.git`, used for model,
   vendor, protocol, and client API compatibility metadata.
 
+## SDK Generation Standard
+
+Any generated SDK for `sdkwork-local-router` open, app, or backend APIs must
+follow the SDKWork standards in
+`D:\javasource\spring-ai-plus\spring-ai-plus-business\specs\SDK_SPEC.md` and
+`D:\javasource\spring-ai-plus\spring-ai-plus-business\specs\SDK_WORKSPACE_GENERATION_SPEC.md`.
+The only standard HTTP SDK generator is
+`D:\javasource\spring-ai-plus\sdk\sdkwork-sdk-generator`
+(`@sdkwork/sdk-generator` / `sdkgen`), using OpenAPI authority documents and
+derived `*.sdkgen.yaml` inputs. Local-router SDK generation commands,
+manifests, and release notes must record that generator path or resolved
+package location, generator version or commit, input spec, output path,
+language, SDK type, SDK family name, package name, and standard profile.
+
+`sdkwork-code-generator`, local stub generators, copied generator source,
+generic OpenAPI client generators, and handwritten SDK forks are not accepted
+as production SDK sources for this project. A project-local script may use one
+of those names only when it is a thin documented wrapper around the canonical
+`sdkwork-sdk-generator`.
+
 ## Server API Groups
 
 The server is split into three explicit API groups. The group code is part of

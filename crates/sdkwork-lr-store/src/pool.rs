@@ -1,5 +1,6 @@
 use crate::crypto::KeyEncryption;
 use crate::error::StoreError;
+use crate::id::next_runtime_id;
 use crate::models::*;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
@@ -121,11 +122,13 @@ impl Store {
         &self,
         client_api_key: &NewClientApiKey,
     ) -> Result<i64, StoreError> {
+        let id = next_runtime_id(CLIENT_API_KEYS_TABLE)?;
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let result = sqlx::query(&format!(
-                    "INSERT INTO {CLIENT_API_KEYS_TABLE} (user_id, name, key_hash, key_prefix, enabled) VALUES (?, ?, ?, ?, ?)"
+                sqlx::query(&format!(
+                    "INSERT INTO {CLIENT_API_KEYS_TABLE} (id, user_id, name, key_hash, key_prefix, enabled) VALUES (?, ?, ?, ?, ?, ?)"
                 ))
+                .bind(id)
                 .bind(client_api_key.user_id)
                 .bind(&client_api_key.name)
                 .bind(&client_api_key.key_hash)
@@ -134,21 +137,22 @@ impl Store {
                 .execute(pool)
                 .await
                 .map_err(|e| StoreError::Query(e.to_string()))?;
-                Ok(result.last_insert_rowid())
+                Ok(id)
             }
             DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(&format!(
-                    "INSERT INTO {CLIENT_API_KEYS_TABLE} (user_id, name, key_hash, key_prefix, enabled) VALUES ($1, $2, $3, $4, $5) RETURNING id"
+                sqlx::query(&format!(
+                    "INSERT INTO {CLIENT_API_KEYS_TABLE} (id, user_id, name, key_hash, key_prefix, enabled) VALUES ($1, $2, $3, $4, $5, $6)"
                 ))
+                .bind(id)
                 .bind(client_api_key.user_id)
                 .bind(&client_api_key.name)
                 .bind(&client_api_key.key_hash)
                 .bind(&client_api_key.key_prefix)
                 .bind(client_api_key.enabled)
-                .fetch_one(pool)
+                .execute(pool)
                 .await
                 .map_err(|e| StoreError::Query(e.to_string()))?;
-                Ok(row.get::<i64, _>("id"))
+                Ok(id)
             }
         }
     }
@@ -349,6 +353,7 @@ impl Store {
     }
 
     pub async fn insert_account(&self, account: &NewAccount) -> Result<i64, StoreError> {
+        let account_id = next_runtime_id(ACCOUNTS_TABLE)?;
         let encrypted_upstream_api_key = self.encryption.encrypt(&account.upstream_api_key);
         let models_json =
             serde_json::to_string(&account.models).unwrap_or_else(|_| "[]".to_owned());
@@ -359,9 +364,10 @@ impl Store {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let result = sqlx::query(&format!(
-                    "INSERT INTO {ACCOUNTS_TABLE} (user_id, name, provider, base_url, upstream_api_key, upstream_auth_scheme, models, priority, timeout_secs, max_retries, retry_delay_ms, anthropic_version, default_headers, model_route_mappings, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                sqlx::query(&format!(
+                    "INSERT INTO {ACCOUNTS_TABLE} (id, user_id, name, provider, base_url, upstream_api_key, upstream_auth_scheme, models, priority, timeout_secs, max_retries, retry_delay_ms, anthropic_version, default_headers, model_route_mappings, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 ))
+                .bind(account_id)
                 .bind(account.user_id).bind(&account.name).bind(&account.provider).bind(&account.base_url).bind(&encrypted_upstream_api_key)
                 .bind(&account.upstream_auth_scheme)
                 .bind(&models_json).bind(account.priority).bind(account.timeout_secs)
@@ -369,7 +375,6 @@ impl Store {
                 .bind(&account.anthropic_version).bind(&headers_json).bind(&route_mappings_json)
                 .bind(account.enabled)
                 .execute(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
-                let account_id = result.last_insert_rowid();
                 self.replace_model_route_mappings_for_account_from_map(
                     account.user_id,
                     account_id,
@@ -380,17 +385,17 @@ impl Store {
                 Ok(account_id)
             }
             DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(&format!(
-                    "INSERT INTO {ACCOUNTS_TABLE} (user_id, name, provider, base_url, upstream_api_key, upstream_auth_scheme, models, priority, timeout_secs, max_retries, retry_delay_ms, anthropic_version, default_headers, model_route_mappings, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id"
+                sqlx::query(&format!(
+                    "INSERT INTO {ACCOUNTS_TABLE} (id, user_id, name, provider, base_url, upstream_api_key, upstream_auth_scheme, models, priority, timeout_secs, max_retries, retry_delay_ms, anthropic_version, default_headers, model_route_mappings, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"
                 ))
+                .bind(account_id)
                 .bind(account.user_id).bind(&account.name).bind(&account.provider).bind(&account.base_url).bind(&encrypted_upstream_api_key)
                 .bind(&account.upstream_auth_scheme)
                 .bind(&models_json).bind(account.priority).bind(account.timeout_secs)
                 .bind(account.max_retries).bind(account.retry_delay_ms)
                 .bind(&account.anthropic_version).bind(&headers_json).bind(&route_mappings_json)
                 .bind(account.enabled)
-                .fetch_one(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
-                let account_id = row.get::<i64, _>("id");
+                .execute(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
                 self.replace_model_route_mappings_for_account_from_map(
                     account.user_id,
                     account_id,
@@ -637,11 +642,13 @@ impl Store {
         &self,
         route_mapping: &NewModelRouteMapping,
     ) -> Result<i64, StoreError> {
+        let id = next_runtime_id(MODEL_ROUTE_MAPPINGS_TABLE)?;
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let result = sqlx::query(&format!(
-                    "INSERT INTO {MODEL_ROUTE_MAPPINGS_TABLE} (user_id, account_id, account_name, client_model, upstream_model, enabled, notes) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, account_id, client_model) DO UPDATE SET account_name=excluded.account_name, upstream_model=excluded.upstream_model, enabled=excluded.enabled, notes=excluded.notes, version=version + 1, updated_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+                sqlx::query(&format!(
+                    "INSERT INTO {MODEL_ROUTE_MAPPINGS_TABLE} (id, user_id, account_id, account_name, client_model, upstream_model, enabled, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, account_id, client_model) DO UPDATE SET account_name=excluded.account_name, upstream_model=excluded.upstream_model, enabled=excluded.enabled, notes=excluded.notes, version=version + 1, updated_at=strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
                 ))
+                .bind(id)
                 .bind(route_mapping.user_id)
                 .bind(route_mapping.account_id)
                 .bind(&route_mapping.account_name)
@@ -652,22 +659,19 @@ impl Store {
                 .execute(pool)
                 .await
                 .map_err(|e| StoreError::Query(e.to_string()))?;
-                if result.last_insert_rowid() > 0 {
-                    Ok(result.last_insert_rowid())
-                } else {
-                    self.get_model_route_mapping_by_client_model(
-                        route_mapping.user_id,
-                        route_mapping.account_id,
-                        &route_mapping.client_model,
-                    )
-                    .await
-                    .map(|row| row.id)
-                }
+                self.get_model_route_mapping_by_client_model(
+                    route_mapping.user_id,
+                    route_mapping.account_id,
+                    &route_mapping.client_model,
+                )
+                .await
+                .map(|row| row.id)
             }
             DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(&format!(
-                    "INSERT INTO {MODEL_ROUTE_MAPPINGS_TABLE} (user_id, account_id, account_name, client_model, upstream_model, enabled, notes) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT(user_id, account_id, client_model) DO UPDATE SET account_name=excluded.account_name, upstream_model=excluded.upstream_model, enabled=excluded.enabled, notes=excluded.notes, version={MODEL_ROUTE_MAPPINGS_TABLE}.version + 1, updated_at=NOW() RETURNING id"
+                sqlx::query(&format!(
+                    "INSERT INTO {MODEL_ROUTE_MAPPINGS_TABLE} (id, user_id, account_id, account_name, client_model, upstream_model, enabled, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT(user_id, account_id, client_model) DO UPDATE SET account_name=excluded.account_name, upstream_model=excluded.upstream_model, enabled=excluded.enabled, notes=excluded.notes, version={MODEL_ROUTE_MAPPINGS_TABLE}.version + 1, updated_at=NOW()"
                 ))
+                .bind(id)
                 .bind(route_mapping.user_id)
                 .bind(route_mapping.account_id)
                 .bind(&route_mapping.account_name)
@@ -675,10 +679,16 @@ impl Store {
                 .bind(&route_mapping.upstream_model)
                 .bind(route_mapping.enabled)
                 .bind(&route_mapping.notes)
-                .fetch_one(pool)
+                .execute(pool)
                 .await
                 .map_err(|e| StoreError::Query(e.to_string()))?;
-                Ok(row.get::<i64, _>("id"))
+                self.get_model_route_mapping_by_client_model(
+                    route_mapping.user_id,
+                    route_mapping.account_id,
+                    &route_mapping.client_model,
+                )
+                .await
+                .map(|row| row.id)
             }
         }
     }
@@ -875,11 +885,13 @@ impl Store {
     // === Invocation CRUD ===
 
     pub async fn insert_invocation(&self, inv: &NewInvocation) -> Result<(), StoreError> {
+        let id = next_runtime_id(INVOCATIONS_TABLE)?;
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(&format!(
-                    "INSERT INTO {INVOCATIONS_TABLE} (user_id, request_id, account_name, protocol, method, path, query, model, status, status_code, latency_ms, error_message, request_body, response_body, request_body_size, response_body_size, upstream_protocol, upstream_path, client_api, request_surface, target_surface, plugin_policy, plugin_id, model_vendor, metadata, streaming, attempt_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO {INVOCATIONS_TABLE} (id, user_id, request_id, account_name, protocol, method, path, query, model, status, status_code, latency_ms, error_message, request_body, response_body, request_body_size, response_body_size, upstream_protocol, upstream_path, client_api, request_surface, target_surface, plugin_policy, plugin_id, model_vendor, metadata, streaming, attempt_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 ))
+                .bind(id)
                 .bind(inv.user_id).bind(&inv.request_id).bind(&inv.account_name).bind(&inv.protocol)
                 .bind(&inv.method).bind(&inv.path).bind(&inv.query).bind(&inv.model)
                 .bind(&inv.status).bind(inv.status_code).bind(inv.latency_ms).bind(&inv.error_message)
@@ -893,8 +905,9 @@ impl Store {
             }
             DatabasePool::Postgres(pool) => {
                 sqlx::query(&format!(
-                    "INSERT INTO {INVOCATIONS_TABLE} (user_id, request_id, account_name, protocol, method, path, query, model, status, status_code, latency_ms, error_message, request_body, response_body, request_body_size, response_body_size, upstream_protocol, upstream_path, client_api, request_surface, target_surface, plugin_policy, plugin_id, model_vendor, metadata, streaming, attempt_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25::jsonb, $26, $27)"
+                    "INSERT INTO {INVOCATIONS_TABLE} (id, user_id, request_id, account_name, protocol, method, path, query, model, status, status_code, latency_ms, error_message, request_body, response_body, request_body_size, response_body_size, upstream_protocol, upstream_path, client_api, request_surface, target_surface, plugin_policy, plugin_id, model_vendor, metadata, streaming, attempt_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26::jsonb, $27, $28)"
                 ))
+                .bind(id)
                 .bind(inv.user_id).bind(&inv.request_id).bind(&inv.account_name).bind(&inv.protocol)
                 .bind(&inv.method).bind(&inv.path).bind(&inv.query).bind(&inv.model)
                 .bind(&inv.status).bind(inv.status_code).bind(inv.latency_ms).bind(&inv.error_message)
@@ -950,19 +963,22 @@ impl Store {
     // === Usage CRUD ===
 
     pub async fn insert_usage(&self, usage: &NewUsage) -> Result<(), StoreError> {
+        let id = next_runtime_id(USAGES_TABLE)?;
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(&format!(
-                    "INSERT INTO {USAGES_TABLE} (user_id, request_id, model, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO {USAGES_TABLE} (id, user_id, request_id, model, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)"
                 ))
+                .bind(id)
                 .bind(usage.user_id).bind(&usage.request_id).bind(&usage.model)
                 .bind(usage.prompt_tokens).bind(usage.completion_tokens).bind(usage.total_tokens)
                 .execute(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
             }
             DatabasePool::Postgres(pool) => {
                 sqlx::query(&format!(
-                    "INSERT INTO {USAGES_TABLE} (user_id, request_id, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5, $6)"
+                    "INSERT INTO {USAGES_TABLE} (id, user_id, request_id, model, prompt_tokens, completion_tokens, total_tokens) VALUES ($1, $2, $3, $4, $5, $6, $7)"
                 ))
+                .bind(id)
                 .bind(usage.user_id).bind(&usage.request_id).bind(&usage.model)
                 .bind(usage.prompt_tokens).bind(usage.completion_tokens).bind(usage.total_tokens)
                 .execute(pool).await.map_err(|e| StoreError::Query(e.to_string()))?;
@@ -1241,6 +1257,13 @@ mod tests {
         (url, path)
     }
 
+    fn assert_runtime_snowflake_id(id: i64) {
+        assert!(
+            id > 1_000_000_000_000,
+            "runtime id {id} must be generated by the Snowflake id generator, not the database"
+        );
+    }
+
     #[tokio::test]
     async fn migrations_create_only_local_router_owned_tables() {
         let (url, path) = temp_sqlite_url("prefixed-tables");
@@ -1291,6 +1314,143 @@ mod tests {
             assert!(!normalized.contains("create table if not exists usages"));
             assert!(!normalized.contains("api_key             "));
         }
+    }
+
+    #[test]
+    fn migration_sources_do_not_allocate_runtime_ids_in_database() {
+        let migration_sources = [
+            include_str!("../migrations/sqlite/20260522000001_init.sql"),
+            include_str!("../migrations/sqlite/20260604000004_add_model_route_mappings_table.sql"),
+            include_str!("../migrations/postgres/20260522000001_init.sql"),
+            include_str!(
+                "../migrations/postgres/20260604000004_add_model_route_mappings_table.sql"
+            ),
+        ];
+
+        for source in migration_sources {
+            let normalized = source.to_ascii_lowercase();
+            assert!(!normalized.contains("bigserial"));
+            assert!(!normalized.contains(&format!("auto{}", "increment")));
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_business_inserts_use_explicit_snowflake_ids() {
+        let (url, path) = temp_sqlite_url("snowflake-runtime-ids");
+        let store = Store::new(&url).await.unwrap();
+        store.run_migrations().await.unwrap();
+
+        let key_id = store
+            .insert_client_api_key(&NewClientApiKey {
+                user_id: 31,
+                name: "runtime key".to_owned(),
+                key_hash: Store::client_api_key_hash("sk-runtime-id"),
+                key_prefix: Store::client_api_key_prefix("sk-runtime-id"),
+                enabled: true,
+            })
+            .await
+            .unwrap();
+        assert_runtime_snowflake_id(key_id);
+
+        let account_id = store
+            .insert_account(&NewAccount {
+                user_id: 31,
+                name: "runtime-account".to_owned(),
+                provider: "openai".to_owned(),
+                base_url: "https://runtime.example/v1".to_owned(),
+                upstream_api_key: "sk-test".to_owned(),
+                upstream_auth_scheme: None,
+                models: vec!["gpt-runtime".to_owned()],
+                priority: 10,
+                timeout_secs: 120,
+                max_retries: 0,
+                retry_delay_ms: 500,
+                anthropic_version: None,
+                default_headers: BTreeMap::new(),
+                model_route_mappings: BTreeMap::new(),
+                enabled: true,
+            })
+            .await
+            .unwrap();
+        assert_runtime_snowflake_id(account_id);
+
+        let route_mapping_id = store
+            .upsert_model_route_mapping(&NewModelRouteMapping {
+                user_id: 31,
+                account_id,
+                account_name: "runtime-account".to_owned(),
+                client_model: "gpt-5.5".to_owned(),
+                upstream_model: "gpt-runtime".to_owned(),
+                enabled: true,
+                notes: None,
+            })
+            .await
+            .unwrap();
+        assert_runtime_snowflake_id(route_mapping_id);
+
+        store
+            .insert_invocation(&NewInvocation {
+                user_id: 31,
+                request_id: "runtime-request".to_owned(),
+                account_name: Some("runtime-account".to_owned()),
+                protocol: "openai".to_owned(),
+                method: "POST".to_owned(),
+                path: "/v1/responses".to_owned(),
+                query: None,
+                model: Some("gpt-5.5".to_owned()),
+                status: "completed".to_owned(),
+                status_code: Some(200),
+                latency_ms: Some(12),
+                error_message: None,
+                request_body: None,
+                response_body: None,
+                request_body_size: Some(2),
+                response_body_size: Some(2),
+                upstream_protocol: Some("openai".to_owned()),
+                upstream_path: Some("/responses".to_owned()),
+                client_api: Some("codex".to_owned()),
+                request_surface: Some("OPENAI_RESPONSES".to_owned()),
+                target_surface: Some("OPENAI_RESPONSES".to_owned()),
+                plugin_policy: Some("auto".to_owned()),
+                plugin_id: None,
+                model_vendor: Some("openai".to_owned()),
+                metadata: None,
+                streaming: false,
+                attempt_count: 1,
+            })
+            .await
+            .unwrap();
+        let invocation = store
+            .list_invocations_for_user(31, 10, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("invocation row must be stored");
+        assert_runtime_snowflake_id(invocation.id);
+
+        store
+            .insert_usage(&NewUsage {
+                user_id: 31,
+                request_id: "runtime-request".to_owned(),
+                model: Some("gpt-5.5".to_owned()),
+                prompt_tokens: Some(8),
+                completion_tokens: Some(5),
+                total_tokens: Some(13),
+            })
+            .await
+            .unwrap();
+        let usage = store
+            .list_usages_for_user(31, 10, 0)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("usage row must be stored");
+        assert_runtime_snowflake_id(usage.id);
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 
     #[tokio::test]
