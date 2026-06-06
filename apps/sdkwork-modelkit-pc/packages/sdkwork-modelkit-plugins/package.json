@@ -1,0 +1,11 @@
+{
+  "name": "@sdkwork/modelkit-plugins",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "react": "^19.0.1",
+    "lucide-react": "^0.546.0",
+    "@sdkwork/modelkit-types": "*",
+    "@sdkwork/modelkit-services": "*"
+  }
+}

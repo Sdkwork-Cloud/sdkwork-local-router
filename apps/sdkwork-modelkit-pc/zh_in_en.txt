@@ -1,0 +1,1461 @@
+Chinese in EN json: common.json -> txt_1413: {language === 'zh' ? '中文' : 'ENG'}
+Chinese in EN json: common.json -> txt_1414: {language === 'zh' ? '订单历史' : 'My Orders'}
+Chinese in EN json: news.json -> txt_1000: 返回列表
+Chinese in EN json: news.json -> txt_1001: 在这起最新披露的事件中，攻击者通过精妙的伪装绕过了系统的前端检测规则，直接触达了后端的核心漏洞服务。目前受影响的系统网络范围还在进一步的评估当中，但不排除已有敏感数据被未授权访问的可能。该漏洞的严重程度经过内部安全团队紧急评估，已被提级，这是由于其极低的利用门槛以及能够造成的权限提升后果决定的。
+Chinese in EN json: news.json -> txt_1002: 漏洞深度剖析与攻击利用手法溯源
+Chinese in EN json: news.json -> txt_1003: 根据前线应急响应团队（CERT）以及合作安全厂商联合提供的事件分析报告，该漏洞的核心诱因在于应用程序的接口层对特定的请求内容，涵盖 user agent 以及一系列业务自定义 header 缺乏严格且规范的入参校验与过滤，导致在进行序列化数据处理和内存映射时，解析器发生了非预期的状态流转乃至溢出，并隐性地忽略了后续应有的所有强安全验证步骤。
+Chinese in EN json: news.json -> txt_1004: 在隔离沙箱内进行的 PoC 还原测试中，安全研究员证实，仅需向存在缺陷的 API 端点发送经过特殊编码处理、携带有害载荷的 HTTP Payload，即可在完全绕过现有所有身份权限验证（认证绕过）的情况下，成功在底层操作系统上执行任意代码或是获取高级别系统指令特权，危害极大且隐蔽性极高。
+Chinese in EN json: news.json -> txt_1005: 紧急修补方案与长远安全加固建议
+Chinese in EN json: news.json -> txt_1006: 我们强烈建议所有相关的企业用户和系统管理员立即行动，排查现有资产列表，并在第一时间将涉事组件全面升级到最新公布的安全版本，该版本已由官方发布且包含针对性的完整修复补丁。此外，为缓解短期的攻击威胁，应立即在 WAF 及所有流量清洗设施层面上增加对异常数据包的特征码过滤与拦截网关规则。
+Chinese in EN json: news.json -> txt_1007: 同时，为了防患于未然并提升整体防御韧性，我们建议在接下来的迭代周期内：
+Chinese in EN json: news.json -> txt_1008: 对核心交互路径和所有横向越权鉴权的底层代码实施全面的审计重构；
+Chinese in EN json: news.json -> txt_1009: 引入并强制实施更严格的输入验证净化机制（白名单策略为主）；
+Chinese in EN json: news.json -> txt_1010: 将防御机制从仅仅依靠边缘节点防护转移并下沉至业务内网以及服务架构的微核心应用层中，推行零信任网络（Zero Trust）的最佳实践标准。
+Chinese in EN json: news.json -> txt_1011: 最新文章
+Chinese in EN json: news.json -> txt_1012: 热门文章
+Chinese in EN json: news.json -> txt_1013: {item.views} 热度
+Chinese in EN json: news.json -> txt_1014: Seebug 最新 Paper
+Chinese in EN json: news.json -> txt_1015: 扫码阅读更多
+Chinese in EN json: news.json -> txt_1016: 微信搜一搜
+Chinese in EN json: news.json -> txt_1017: 安全威胁纵横
+Chinese in EN json: relay.json -> txt_1018: About this endpoint / 节点介绍
+Chinese in EN json: relay.json -> txt_1019: Base API URL / 接口地址
+Chinese in EN json: repos.json -> txt_1020: Git Clone Address / Git 仓库地址
+Chinese in EN json: repos.json -> txt_1021: Recommendation Reason / 推荐理由
+Chinese in EN json: repos.json -> txt_1022: About this repository / 项目介绍
+Chinese in EN json: repos.json -> txt_1023: Submit / Recommend Repository (推荐或提交仓库)
+Chinese in EN json: repos.json -> txt_1024: Git Repository URL / Git 仓库地址
+Chinese in EN json: repos.json -> txt_1025: Organization Name / 组织或作者名称
+Chinese in EN json: repos.json -> txt_1026: Repository Name / 仓库名称
+Chinese in EN json: repos.json -> txt_1027: Primary Language / 主要语言
+Chinese in EN json: repos.json -> txt_1028: Category / 分类
+Chinese in EN json: repos.json -> txt_1029: Short Description / 项目一句话简述
+Chinese in EN json: repos.json -> txt_1030: Why recommend this repository? / 推荐原因与痛点解决
+Chinese in EN json: repos.json -> txt_1031: Submitter Email / 您的联系邮箱 (Optional)
+Chinese in EN json: shop.json -> txt_1032: handleRemoveFromCart(item.product.id, item.selectedSku?.id)}
+                        className="text-[10px] text-text-muted hover:text-red-400 font-bold uppercase tracking-wider"
+                      >
+                        移除 (Remove)
+Chinese in EN json: shop.json -> txt_1033: 订单编号：
+Chinese in EN json: shop.json -> txt_1034: 交易成功
+Chinese in EN json: shop.json -> txt_1035: (SF) 顺丰派送中
+Chinese in EN json: shop.json -> txt_1036: 您的专属数字卡密/API Key
+Chinese in EN json: shop.json -> txt_1037: 实体商品将发往下方地址
+Chinese in EN json: shop.json -> txt_1038: {product.sellerName || '极客顽主'}
+Chinese in EN json: shop.json -> txt_1039: {product.sellerCredit || '信誉优秀'}
+Chinese in EN json: shop.json -> txt_1040: {product.location || '上海'}
+Chinese in EN json: shop.json -> txt_1041: {product.type === 'virtual' ? '虚拟' : '实物'}
+Chinese in EN json: shop.json -> txt_1042: 9k+ 人想要
+Chinese in EN json: shop.json -> txt_1043: 提货
+Chinese in EN json: shop.json -> txt_1044: 申请商家入驻
+Chinese in EN json: shop.json -> txt_1045: 快速发布商品
+Chinese in EN json: shop.json -> txt_1046: 声明：店内的
+Chinese in EN json: shop.json -> txt_1047: 虚拟商品 (算力、充值包、密钥)
+Chinese in EN json: shop.json -> txt_1048: 经授权会即时产生可解密的单发券码，供您向服务端进行鉴权认证。
+Chinese in EN json: shop.json -> txt_1049: 实物周边及节点物理微机
+Chinese in EN json: shop.json -> txt_1050: 提供完整物流保价和售后维修承诺。
+Chinese in EN json: shop.json -> txt_1051: {[
+                  { icon: '📱', title: 'iPhone 15 Pro Max', desc: '钛金属 全新发售' },
+                  { icon: '🎧', title: 'Sony WH-1000XM5', desc: '头戴降噪旗舰 新品' },
+                  { icon: '📱', title: 'Samsung Z Fold 5', desc: '无缝折叠 新一代' },
+                  { icon: '👓', title: 'Apple Vision Pro', desc: '空间计算设备' },
+                  { icon: '🎧', title: 'Bose QC Ultra Earbuds', desc: '沉浸空间音频' },
+                  { icon: '📱', title: 'Xiaomi 14 Pro', desc: '徕卡光学 澎湃OS' },
+                  { icon: '🎧', title: 'Sennheiser Momentum 4', desc: '发烧级音质 续航怪物' }
+                ].map((item, idx) => (
+Chinese in EN json: shop.json -> txt_1052: {[
+                  { icon: '📱', title: '华为 Mate 60 Pro', desc: '遥遥领先 现货限购' },
+                  { icon: '🎧', title: 'AirPods Pro 2', desc: '无缝生态 销量冠军' },
+                  { icon: '📱', title: 'iPhone 15', desc: '灵动岛 性价比优选' },
+                  { icon: '📱', title: 'Redmi K70', desc: '性能标杆 焊门员' },
+                  { icon: '🎧', title: 'Beats Studio Pro', desc: '通透模式 潮流单品' },
+                  { icon: '📱', title: 'OnePlus 12', desc: '哈苏影像 十年旗舰' },
+                  { icon: '🎧', title: 'Sony WF-1000XM5', desc: '真无线 降噪豆' }
+                ].map((item, idx) => (
+Chinese in EN json: shop.json -> txt_1053: {[
+                  { icon: '📱', title: 'Samsung Galaxy S24 Ultra', desc: 'AI手机 影像级体验' },
+                  { icon: '🎧', title: 'Bose QC Ultra', desc: '空间音频 佩戴舒适' },
+                  { icon: '📱', title: 'Google Pixel 8 Pro', desc: '原生安卓 AI修图' },
+                  { icon: '🎧', title: 'AirPods Max', desc: '计算音频 极致保真' },
+                  { icon: '📱', title: 'Vivo X100 Pro', desc: '蔡司联名 潜望长焦' },
+                  { icon: '🎧', title: 'Nothing Ear (2)', desc: '透明探索 独特设计' },
+                  { icon: '📱', title: 'Oppo Find X7 Ultra', desc: '双潜望摄像 哈苏影调' }
+                ].map((item, idx) => (
+Chinese in EN json: shop.json -> txt_1054: 在极客资产中搜索...
+Chinese in EN json: shop.json -> txt_1055: void;
+  onSubmit: () => void;
+}
+
+export function ApplyPublisherModal({ onClose, onSubmit }: ApplyPublisherModalProps) {
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit();
+    toast.success('入驻申请已自动通过测试环境审批，您现在可以发布商品了！');
+  };
+
+  return (
+Chinese in EN json: shop.json -> txt_1056: 申请商家入驻
+Chinese in EN json: shop.json -> txt_1057: 入驻成为极客资产商店商家，自由发布您的算力资源、API 服务、闲置物理极客终端设备或客制化周边。
+Chinese in EN json: shop.json -> txt_1058: 商家/团队名称
+Chinese in EN json: shop.json -> txt_1059: 经营类目
+Chinese in EN json: shop.json -> txt_1060: 算力资源与 API 服务
+Chinese in EN json: shop.json -> txt_1061: 二手闲置及硬件终端
+Chinese in EN json: shop.json -> txt_1062: 客制化开发板及周边
+Chinese in EN json: shop.json -> txt_1063: 资质证明 (可选)
+Chinese in EN json: shop.json -> txt_1064: 取消
+Chinese in EN json: shop.json -> txt_1065: 提交申请 (演示)
+Chinese in EN json: shop.json -> txt_1066: 例如：某某黑客工作室
+Chinese in EN json: shop.json -> txt_1067: GitHub 链接或个人网站
+Chinese in EN json: shop.json -> txt_1068: void;
+  onSubmit: (product: Product) => void;
+}
+
+export function PublishProductModal({ onClose, onSubmit }: PublishProductModalProps) {
+  const [publishForm, setPublishForm] = useState({
+    name: '', type: 'virtual' as ProductType, category: 'all' as ProductCategory,
+    price: 0, description: '', longDescription: '', externalUrl: '', imageUrl: '💻', features: ''
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newProd: Product = {
+      id: `prod-custom-${Date.now()}`,
+      name: publishForm.name,
+      type: publishForm.type,
+      category: publishForm.category,
+      price: publishForm.price,
+      description: publishForm.description,
+      longDescription: publishForm.longDescription,
+      imageUrl: publishForm.imageUrl,
+      externalUrl: publishForm.externalUrl || undefined,
+      features: publishForm.features.split('\n').filter(Boolean),
+      specs: {},
+      sellerName: '官方认证',
+      merchantName: '我发布的商品'
+    };
+    
+    onSubmit(newProd);
+    toast.success('商品发布成功！');
+  };
+
+  return (
+Chinese in EN json: shop.json -> txt_1069: 快速发布商品
+Chinese in EN json: shop.json -> txt_1070: 商品名称*
+Chinese in EN json: shop.json -> txt_1071: setPublishForm({...publishForm, name: e.target.value})} placeholder="例如：AWS 1年期账号" className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main" />
+Chinese in EN json: shop.json -> txt_1072: 价格 (USDT/￥)*
+Chinese in EN json: shop.json -> txt_1073: setPublishForm({...publishForm, price: parseFloat(e.target.value) || 0})} placeholder="价格" className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main" />
+Chinese in EN json: shop.json -> txt_1074: 商品分类
+Chinese in EN json: shop.json -> txt_1075: 通用类目
+Chinese in EN json: shop.json -> txt_1076: API 充值与算力
+Chinese in EN json: shop.json -> txt_1077: 硬核物理终端
+Chinese in EN json: shop.json -> txt_1078: 安全代理加密
+Chinese in EN json: shop.json -> txt_1079: 商品图标 (Emoji)
+Chinese in EN json: shop.json -> txt_1080: setPublishForm({...publishForm, imageUrl: e.target.value})} placeholder="例如：💻" className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main text-center" />
+Chinese in EN json: shop.json -> txt_1081: 简短描述*
+Chinese in EN json: shop.json -> txt_1082: setPublishForm({...publishForm, description: e.target.value})} placeholder="一句话亮点描述..." className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main" />
+Chinese in EN json: shop.json -> txt_1083: 发卡链接 / 外部购买链接 (选填)
+Chinese in EN json: shop.json -> txt_1084: 如果填写了外部链接，用户点击购买将直接跳转到该链接。
+Chinese in EN json: shop.json -> txt_1085: 详细功能特色 (每行一项)
+Chinese in EN json: shop.json -> txt_1086: setPublishForm({...publishForm, features: e.target.value})} placeholder="- 独立原生 IP&#10;- 支持退款&#10;- 高级权限" className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main custom-scrollbar">
+Chinese in EN json: shop.json -> txt_1087: 取消
+Chinese in EN json: shop.json -> txt_1088: 确认发布商品
+Chinese in EN json: shop.json -> txt_1089: 购买商品清单合计
+Chinese in EN json: shop.json -> txt_1090: 实付总计金额：
+Chinese in EN json: shop.json -> txt_1091: 实物派送收货地址 (SF Express)
+Chinese in EN json: shop.json -> txt_1092: 收货人：
+Chinese in EN json: shop.json -> txt_1093: setAddressName(e.target.value)}
+                      placeholder="姓名"
+                      className="w-full bg-surface-hover border border-divider rounded-lg px-3 py-2 text-text-main placeholder-gray-700 outline-none focus:border-primary-hover focus:ring-1 focus:ring-primary-hover font-medium"
+                    />
+Chinese in EN json: shop.json -> txt_1094: 手机号码：
+Chinese in EN json: shop.json -> txt_1095: setAddressPhone(e.target.value)}
+                      placeholder="移动电话"
+                      className="w-full bg-surface-hover border border-divider rounded-lg px-3 py-2 text-text-main placeholder-gray-700 outline-none focus:border-primary-hover focus:ring-1 focus:ring-primary-hover font-medium"
+                    />
+Chinese in EN json: shop.json -> txt_1096: 详细配送地址：
+Chinese in EN json: shop.json -> txt_1097: setAddressDetail(e.target.value)}
+                    placeholder="详细到路径街道、门牌和公司/住宅房间号"
+                    className="w-full bg-surface-hover border border-divider rounded-lg px-3 py-2 text-text-main placeholder-gray-700 outline-none focus:border-primary-hover focus:ring-1 focus:ring-primary-hover font-medium leading-relaxed resize-none"
+                  />
+Chinese in EN json: shop.json -> txt_1098: 选择安全支付手段
+Chinese in EN json: shop.json -> txt_1099: 支付宝支付
+Chinese in EN json: shop.json -> txt_1100: 微信支付
+Chinese in EN json: shop.json -> txt_1101: 银联 / 信用卡
+Chinese in EN json: shop.json -> txt_1102: 取消
+Chinese in EN json: shop.json -> txt_1103: 确认订单并支付
+Chinese in EN json: shop.json -> txt_1104: 支付载体：
+Chinese in EN json: shop.json -> txt_1105: {paymentMethod === 'alipay' ? '支付宝' : paymentMethod === 'wechat' ? '微信' : '银联在线代扣'}
+Chinese in EN json: shop.json -> txt_1106: 应付总计：
+Chinese in EN json: shop.json -> txt_1107: 双向安全通道握手
+Chinese in EN json: shop.json -> txt_1108: 请使用电子钱包扫描二维码进行代开发
+Chinese in EN json: shop.json -> txt_1109: 该页面仅用于沙箱模拟联调测试，不会发生真实扣费 &nbsp;|&nbsp; 剩余有效时间
+Chinese in EN json: shop.json -> txt_1110: 模拟卡片号码 (Card Number)
+Chinese in EN json: shop.json -> txt_1111: 🛡️ 金融沙箱自备虚拟银行盾已默认代扣。直接点击下方“模拟支付完成”即可注入秘钥库验证。
+Chinese in EN json: shop.json -> txt_1112: 取消
+Chinese in EN json: shop.json -> txt_1113: 模拟支付完成
+Chinese in EN json: shop.json -> txt_1114: 正在向中转路由发出支付与发卡报文...
+Chinese in EN json: shop.json -> txt_1115: [SYS] 拦截中继信息，进行券码生成及订单分配中...
+Chinese in EN json: shop.json -> txt_1116: 交易安全交付成功！
+Chinese in EN json: shop.json -> txt_1117: 您的订单已被标记为成功交付。可在
+Chinese in EN json: shop.json -> txt_1118: 「订单记录」
+Chinese in EN json: shop.json -> txt_1119: 中任意时刻重复翻查、一键复制您的虚拟券码或同步顺丰物流轨迹。
+Chinese in EN json: shop.json -> txt_1120: 查看我的订单凭证
+Chinese in EN json: shop.json -> txt_1121: 关闭窗口
+Chinese in EN json: shop.json -> txt_1122: = {
+  'prod-api-credits-ultra': ['🏷️', '⚡', '💻', '📈'],
+  'prod-cot-thinking': ['🧠', '🌳', '🧩', '💡'],
+  'prod-mcp-hw-node': ['📟', '🔌', '🎛️', '⚙️'],
+  'prod-hoodie-code': ['🧥', '🧶', '🧵', '👕'],
+  'prod-custom-keycap': ['⌨️', '🎨', '⚙️', '🧱'],
+  'prod-gateway-key-annual': ['🔑', '🔒', '🛡️', '🛰️'],
+  'prod-used-raspi': ['🍓', '📦', '🔋', '🔌'],
+  'prod-mechanical-keyboard': ['⌨️', '🔋', '📻', '📦']
+};
+
+interface ProductDetailsViewProps {
+  product: Product;
+  selectedSku: ProductSku | null;
+  onSelectSku: (sku: ProductSku | null) => void;
+  onBack: () => void;
+  getActivePrice: (product: Product, sku: ProductSku | null) => number;
+  onAddToCart: (product: Product, sku: ProductSku | null) => void;
+  onBuyNow: (product: Product, sku: ProductSku | null) => void;
+  onSubmitComment: (productId: string, comment: string) => void;
+}
+
+export function ProductDetailsView({
+  product,
+  selectedSku,
+  onSelectSku,
+  onBack,
+  getActivePrice,
+  onAddToCart,
+  onBuyNow,
+  onSubmitComment
+}: ProductDetailsViewProps) {
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [newCommentText, setNewCommentText] = useState('');
+
+  const handleComment = () => {
+    if (!newCommentText.trim()) {
+      toast.warning('请先输入要提问的问题内容。');
+      return;
+    }
+    onSubmitComment(product.id, newCommentText);
+    setNewCommentText('');
+  };
+
+  return (
+Chinese in EN json: shop.json -> txt_1123: 返回商品列表
+Chinese in EN json: shop.json -> txt_1124: {product.type === 'virtual' ? '虚拟商品' : '实物商品'}
+Chinese in EN json: shop.json -> txt_1125: {product.type === 'virtual' ? '极速发货 (立即履约)' : '顺丰直达急速派送'}
+Chinese in EN json: shop.json -> txt_1126: 规格选项
+Chinese in EN json: shop.json -> txt_1127: 前往 {product.merchantName || '外部商城'} 购买
+Chinese in EN json: shop.json -> txt_1128: 加购物车
+Chinese in EN json: shop.json -> txt_1129: 立即购买
+Chinese in EN json: shop.json -> txt_1130: 极客100%正品
+Chinese in EN json: shop.json -> txt_1131: 担保交易
+Chinese in EN json: shop.json -> txt_1132: 无忧售后
+Chinese in EN json: shop.json -> txt_1133: 商品详细剖析
+Chinese in EN json: shop.json -> txt_1134: 核心架构优势
+Chinese in EN json: shop.json -> txt_1135: 宝贝极客问答录
+Chinese in EN json: shop.json -> txt_1136: 还没有极客抛出技术难题
+Chinese in EN json: shop.json -> txt_1137: 你的首刀拷问，卖家将全速响应
+Chinese in EN json: shop.json -> txt_1138: 问
+Chinese in EN json: shop.json -> txt_1139: 答
+Chinese in EN json: shop.json -> txt_1140: {comment.reply.user} (卖家)
+Chinese in EN json: shop.json -> txt_1141: 主理人正在火速手作答复中...
+Chinese in EN json: shop.json -> txt_1142: 发车核实
+Chinese in EN json: shop.json -> txt_1143: 技术履历 & 参数一览
+Chinese in EN json: shop.json -> txt_1144: 向买过的人求证，输入你的硬核疑问...
+Chinese in EN json: shop.json -> txt_1000: handleRemoveFromCart(item.product.id, item.selectedSku?.id)}
+                        className="text-[10px] text-text-muted hover:text-red-400 font-bold uppercase tracking-wider"
+                      >
+                        移除 (Remove)
+Chinese in EN json: shop.json -> txt_1001: {[
+                  { icon: '📱', title: 'iPhone 15 Pro Max', desc: '钛金属 全新发售' },
+                  { icon: '🎧', title: 'Sony WH-1000XM5', desc: '头戴降噪旗舰 新品' },
+                  { icon: '📱', title: 'Samsung Z Fold 5', desc: '无缝折叠 新一代' },
+                  { icon: '👓', title: 'Apple Vision Pro', desc: '空间计算设备' },
+                  { icon: '🎧', title: 'Bose QC Ultra Earbuds', desc: '沉浸空间音频' },
+                  { icon: '📱', title: 'Xiaomi 14 Pro', desc: '徕卡光学 澎湃OS' },
+                  { icon: '🎧', title: 'Sennheiser Momentum 4', desc: '发烧级音质 续航怪物' }
+                ].map((item, idx) => (
+Chinese in EN json: shop.json -> txt_1002: {[
+                  { icon: '📱', title: '华为 Mate 60 Pro', desc: '遥遥领先 现货限购' },
+                  { icon: '🎧', title: 'AirPods Pro 2', desc: '无缝生态 销量冠军' },
+                  { icon: '📱', title: 'iPhone 15', desc: '灵动岛 性价比优选' },
+                  { icon: '📱', title: 'Redmi K70', desc: '性能标杆 焊门员' },
+                  { icon: '🎧', title: 'Beats Studio Pro', desc: '通透模式 潮流单品' },
+                  { icon: '📱', title: 'OnePlus 12', desc: '哈苏影像 十年旗舰' },
+                  { icon: '🎧', title: 'Sony WF-1000XM5', desc: '真无线 降噪豆' }
+                ].map((item, idx) => (
+Chinese in EN json: shop.json -> txt_1003: {[
+                  { icon: '📱', title: 'Samsung Galaxy S24 Ultra', desc: 'AI手机 影像级体验' },
+                  { icon: '🎧', title: 'Bose QC Ultra', desc: '空间音频 佩戴舒适' },
+                  { icon: '📱', title: 'Google Pixel 8 Pro', desc: '原生安卓 AI修图' },
+                  { icon: '🎧', title: 'AirPods Max', desc: '计算音频 极致保真' },
+                  { icon: '📱', title: 'Vivo X100 Pro', desc: '蔡司联名 潜望长焦' },
+                  { icon: '🎧', title: 'Nothing Ear (2)', desc: '透明探索 独特设计' },
+                  { icon: '📱', title: 'Oppo Find X7 Ultra', desc: '双潜望摄像 哈苏影调' }
+                ].map((item, idx) => (
+Chinese in EN json: shop.json -> txt_1004: void;
+  onSubmit: () => void;
+}
+
+export function ApplyPublisherModal({ onClose, onSubmit }: ApplyPublisherModalProps) {
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit();
+    toast.success('入驻申请已自动通过测试环境审批，您现在可以发布商品了！');
+  };
+
+  return (
+Chinese in EN json: shop.json -> txt_1005: void;
+  onSubmit: (product: Product) => void;
+}
+
+export function PublishProductModal({ onClose, onSubmit }: PublishProductModalProps) {
+  const [publishForm, setPublishForm] = useState({
+    name: '', type: 'virtual' as ProductType, category: 'all' as ProductCategory,
+    price: 0, description: '', longDescription: '', externalUrl: '', imageUrl: '💻', features: ''
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newProd: Product = {
+      id: `prod-custom-${Date.now()}`,
+      name: publishForm.name,
+      type: publishForm.type,
+      category: publishForm.category,
+      price: publishForm.price,
+      description: publishForm.description,
+      longDescription: publishForm.longDescription,
+      imageUrl: publishForm.imageUrl,
+      externalUrl: publishForm.externalUrl || undefined,
+      features: publishForm.features.split('\n').filter(Boolean),
+      specs: {},
+      sellerName: '官方认证',
+      merchantName: '我发布的商品'
+    };
+    
+    onSubmit(newProd);
+    toast.success('商品发布成功！');
+  };
+
+  return (
+Chinese in EN json: shop.json -> txt_1006: setPublishForm({...publishForm, name: e.target.value})} placeholder="例如：AWS 1年期账号" className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main" />
+Chinese in EN json: shop.json -> txt_1007: setPublishForm({...publishForm, price: parseFloat(e.target.value) || 0})} placeholder="价格" className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main" />
+Chinese in EN json: shop.json -> txt_1008: setPublishForm({...publishForm, imageUrl: e.target.value})} placeholder="例如：💻" className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main text-center" />
+Chinese in EN json: shop.json -> txt_1009: setPublishForm({...publishForm, description: e.target.value})} placeholder="一句话亮点描述..." className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main" />
+Chinese in EN json: shop.json -> txt_1010: setPublishForm({...publishForm, features: e.target.value})} placeholder="- 独立原生 IP&#10;- 支持退款&#10;- 高级权限" className="w-full bg-surface border border-divider rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary-main transition-all text-text-main custom-scrollbar">
+Chinese in EN json: shop.json -> txt_1011: setAddressName(e.target.value)}
+                      placeholder="姓名"
+                      className="w-full bg-surface-hover border border-divider rounded-lg px-3 py-2 text-text-main placeholder-gray-700 outline-none focus:border-primary-hover focus:ring-1 focus:ring-primary-hover font-medium"
+                    />
+Chinese in EN json: shop.json -> txt_1012: setAddressPhone(e.target.value)}
+                      placeholder="移动电话"
+                      className="w-full bg-surface-hover border border-divider rounded-lg px-3 py-2 text-text-main placeholder-gray-700 outline-none focus:border-primary-hover focus:ring-1 focus:ring-primary-hover font-medium"
+                    />
+Chinese in EN json: shop.json -> txt_1013: setAddressDetail(e.target.value)}
+                    placeholder="详细到路径街道、门牌和公司/住宅房间号"
+                    className="w-full bg-surface-hover border border-divider rounded-lg px-3 py-2 text-text-main placeholder-gray-700 outline-none focus:border-primary-hover focus:ring-1 focus:ring-primary-hover font-medium leading-relaxed resize-none"
+                  />
+Chinese in EN json: shop.json -> txt_1014: = {
+  'prod-api-credits-ultra': ['🏷️', '⚡', '💻', '📈'],
+  'prod-cot-thinking': ['🧠', '🌳', '🧩', '💡'],
+  'prod-mcp-hw-node': ['📟', '🔌', '🎛️', '⚙️'],
+  'prod-hoodie-code': ['🧥', '🧶', '🧵', '👕'],
+  'prod-custom-keycap': ['⌨️', '🎨', '⚙️', '🧱'],
+  'prod-gateway-key-annual': ['🔑', '🔒', '🛡️', '🛰️'],
+  'prod-used-raspi': ['🍓', '📦', '🔋', '🔌'],
+  'prod-mechanical-keyboard': ['⌨️', '🔋', '📻', '📦']
+};
+
+interface ProductDetailsViewProps {
+  product: Product;
+  selectedSku: ProductSku | null;
+  onSelectSku: (sku: ProductSku | null) => void;
+  onBack: () => void;
+  getActivePrice: (product: Product, sku: ProductSku | null) => number;
+  onAddToCart: (product: Product, sku: ProductSku | null) => void;
+  onBuyNow: (product: Product, sku: ProductSku | null) => void;
+  onSubmitComment: (productId: string, comment: string) => void;
+}
+
+export function ProductDetailsView({
+  product,
+  selectedSku,
+  onSelectSku,
+  onBack,
+  getActivePrice,
+  onAddToCart,
+  onBuyNow,
+  onSubmitComment
+}: ProductDetailsViewProps) {
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [newCommentText, setNewCommentText] = useState('');
+
+  const handleComment = () => {
+    if (!newCommentText.trim()) {
+      toast.warning('请先输入要提问的问题内容。');
+      return;
+    }
+    onSubmitComment(product.id, newCommentText);
+    setNewCommentText('');
+  };
+
+  return (
+Chinese in EN json: skillhub.json -> txt_1145: Source Code / 源码
+Chinese in EN json: software.json -> txt_1146: 一键安装
+Chinese in EN json: software.json -> txt_1147: Local Setup State / 本地安装状态
+Chinese in EN json: software.json -> txt_1148: Installed Locally (已安装)
+Chinese in EN json: software.json -> txt_1149: Not Installed (未安装)
+Chinese in EN json: software.json -> txt_1150: Connection State / 守护进程链接
+Chinese in EN json: software.json -> txt_1151: EDITOR'S PICK / 编辑推荐
+Chinese in EN json: workspace.json -> txt_1152: (null);
+
+  useEffect(() => {
+    userService.fetchProfile().then(setProfile);
+  }, [userService]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSignOut = () => {
+    toast.success('会话已锁。本地终端保持驻留。');
+    setIsOpen(false);
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1153: 权限级别:
+Chinese in EN json: workspace.json -> txt_1154: 根系统管理员 (Root)
+Chinese in EN json: workspace.json -> txt_1155: 用户信息
+Chinese in EN json: workspace.json -> txt_1156: 系统设置
+Chinese in EN json: workspace.json -> txt_1157: 订单记录
+Chinese in EN json: workspace.json -> txt_1158: 购物车
+Chinese in EN json: workspace.json -> txt_1159: 锁定会话
+Chinese in EN json: workspace.json -> txt_1160: {/* 1. WeChat-Style Narrow Left Icon Rail (最左侧极窄功能图标条) */}
+Chinese in EN json: workspace.json -> txt_1161: {
+                setActiveTab('tools');
+                // Auto active first tool if non-setting view is empty
+                if (tools.length > 0 && (activeToolId === 'system-settings' || activeToolId === 'user-profile')) {
+                  setActiveToolId(tools[0].id);
+                }
+              }}
+              className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all relative ${
+                activeTab === 'tools' 
+                  ? 'text-blue-400 bg-blue-600/10 border border-blue-500/25 shadow-inner' 
+                  : 'text-text-muted hover:text-text-main hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
+              }`}
+              title="工具网络 / Agent Tools"
+            >
+Chinese in EN json: workspace.json -> txt_1162: 工具
+Chinese in EN json: workspace.json -> txt_1163: {/* Request Logs tab (请求日志) */}
+Chinese in EN json: workspace.json -> txt_1164: {/* Usage tab (数据统计) */}
+Chinese in EN json: workspace.json -> txt_1165: {/* VIP Upgrade Feature Button (设置上方增加一个VIP的icon) */}
+Chinese in EN json: workspace.json -> txt_1166: {
+              setActiveTab('vip');
+            }}
+            className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all relative group ${
+              activeTab === 'vip' 
+                ? 'text-amber-400 bg-amber-600/15 border border-amber-500/30 shadow-[inset_0_1px_rgba(255,255,255,0.05),0_1px_8px_rgba(245,158,11,0.2)]' 
+                : 'text-text-muted hover:text-amber-400 hover:bg-amber-500/5 border border-transparent'
+            }`}
+            title="订阅 VIP 会员"
+          >
+Chinese in EN json: workspace.json -> txt_1167: 组件工具
+Chinese in EN json: workspace.json -> txt_1168: 加载中...
+Chinese in EN json: workspace.json -> txt_1169: 没有找到匹配组件
+Chinese in EN json: workspace.json -> txt_1170: 中转节点列表
+Chinese in EN json: workspace.json -> txt_1171: 暂无可用路由节点
+Chinese in EN json: workspace.json -> txt_1172: 本地密钥配置
+Chinese in EN json: workspace.json -> txt_1173: 配置面板
+Chinese in EN json: workspace.json -> txt_1174: 寻找组件...
+Chinese in EN json: workspace.json -> txt_1175: Api Key 管理
+Chinese in EN json: workspace.json -> txt_1176: 系统环境参数
+Chinese in EN json: workspace.json -> txt_1177: 个人开发者中心
+Chinese in EN json: workspace.json -> txt_1178: 一键安装
+Chinese in EN json: workspace.json -> txt_1179: 已安装 (Installed)
+Chinese in EN json: workspace.json -> txt_1180: onUninstall?.(activeTool.id)}
+                    className="px-2.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 hover:border-red-500/50 text-red-500 hover:text-red-400 text-xs font-semibold transition-all cursor-pointer select-none"
+                  >
+                    卸载
+Chinese in EN json: workspace.json -> txt_1181: 活动中 (Active Node)
+Chinese in EN json: workspace.json -> txt_1182: 系统部署向导 / Setup Wizard
+Chinese in EN json: workspace.json -> txt_1183: 正在部署 {installType === 'cli' ? 'CLI 命令行守护进程' : 'Desktop 桌面窗口核心'} 到您的工作空间流中
+Chinese in EN json: workspace.json -> txt_1184: 传输速度 / Rate
+Chinese in EN json: workspace.json -> txt_1185: 配置类型 / Arch
+Chinese in EN json: workspace.json -> txt_1186: 进程状态 / Thread
+Chinese in EN json: workspace.json -> txt_1187: 底层端口 / Port
+Chinese in EN json: workspace.json -> txt_1188: 部署 {activeTool.name} 环境
+Chinese in EN json: workspace.json -> txt_1189: 该组件目前由于缺少本地依赖运行时配置而处于未安装状态，请在下方选择合适的端部署方式。
+Chinese in EN json: workspace.json -> txt_1190: CLI 命令行终端工具
+Chinese in EN json: workspace.json -> txt_1191: 基于 Node.js 精简内核发布、通过 npm 部署。占用极其微小的运存，常驻物理核心，适合高效率全键盘工作流。
+Chinese in EN json: workspace.json -> txt_1192: 可执行指令:
+Chinese in EN json: workspace.json -> txt_1193: 立即配置 &rarr;
+Chinese in EN json: workspace.json -> txt_1194: Desktop GUI 桌面可视化客户端
+Chinese in EN json: workspace.json -> txt_1195: 独立可交互可视化应用程序，配备托盘控制面板与后台自动驻留配置。适合对全局图形视窗有要求的开发者。
+Chinese in EN json: workspace.json -> txt_1196: 应用程序大小:
+Chinese in EN json: workspace.json -> txt_1197: 立即配置 &rarr;
+Chinese in EN json: workspace.json -> txt_1198: 系统环境前置校验 / System Pre-checks
+Chinese in EN json: workspace.json -> txt_1199: 操作系统兼容性
+Chinese in EN json: workspace.json -> txt_1200: Node.js Toolkit 运行时
+Chinese in EN json: workspace.json -> txt_1201: 本地 3000 端口接续
+Chinese in EN json: workspace.json -> txt_1202: 一键启动部署引导
+Chinese in EN json: workspace.json -> txt_1203: {modalMode === 'add' ? '添加 API 密钥' : '编辑 API 密钥'}
+Chinese in EN json: workspace.json -> txt_1204: 密钥名称
+Chinese in EN json: workspace.json -> txt_1205: API 密钥值 (API Key)
+Chinese in EN json: workspace.json -> txt_1206: {
+                      navigator.clipboard.writeText(formData.key);
+                      toast.success('输入的 API 密钥已复制！');
+                    }}
+                    className="p-1 hover:text-blue-400 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-all cursor-pointer"
+                    title="复制 API 密钥"
+                  >
+Chinese in EN json: workspace.json -> txt_1207: 自定义端点 (Base URL - 可选)
+Chinese in EN json: workspace.json -> txt_1208: {
+                      navigator.clipboard.writeText(formData.baseUrl);
+                      toast.success('输入的 API 密钥自定义端点已复制！');
+                    }}
+                    className="p-1 text-text-muted hover:text-blue-400 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-all cursor-pointer"
+                    title="复制 Base URL"
+                  >
+Chinese in EN json: workspace.json -> txt_1209: 取消
+Chinese in EN json: workspace.json -> txt_1210: 保存
+Chinese in EN json: workspace.json -> txt_1211: 选择安装方式 / Install Mode
+Chinese in EN json: workspace.json -> txt_1212: 请为
+Chinese in EN json: workspace.json -> txt_1213: 选择适合您系统架构与偏好的安装模式：
+Chinese in EN json: workspace.json -> txt_1214: CLI 命令行终端工具 / Command Line Tool
+Chinese in EN json: workspace.json -> txt_1215: 基于命令行的轻量无界面守护进程运行，可通过系统 Terminal 指令（CLI）直接调用，具备极高的部署运行灵活性。
+Chinese in EN json: workspace.json -> txt_1216: Desktop 桌面端窗口 / GUI Application
+Chinese in EN json: workspace.json -> txt_1217: 启动原生桌面容器支持，自动处理后台依赖并接管网络通道，具备完整的图形操作面板与状态托盘。
+Chinese in EN json: workspace.json -> txt_1218: 取消 / Cancel
+Chinese in EN json: workspace.json -> txt_1219: {
+                if (onInstall) {
+                  onInstall(activeTool.id, selectedType);
+                }
+                onClose();
+              }}
+              className="px-5 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white transition-all shadow-[0_4px_16px_rgba(37,99,235,0.2)]"
+            >
+              继续部署 / Deploy
+Chinese in EN json: workspace.json -> txt_1220: {modalMode === 'add' ? '添加模型' : '编辑模型'}
+Chinese in EN json: workspace.json -> txt_1221: 名称
+Chinese in EN json: workspace.json -> txt_1222: OpenAI 地址
+Chinese in EN json: workspace.json -> txt_1223: {
+                    navigator.clipboard.writeText(formData.openaiUrl || '');
+                    toast.success('OpenAI 接口地址已复制到剪贴板！');
+                  }}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-blue-400 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+                  title="复制 OpenAI 地址"
+                >
+Chinese in EN json: workspace.json -> txt_1224: Anthropic 地址
+Chinese in EN json: workspace.json -> txt_1225: {
+                    navigator.clipboard.writeText(formData.anthropicUrl || '');
+                    toast.success('Anthropic 接口地址已复制到剪贴板！');
+                  }}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-blue-400 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+                  title="复制 Anthropic 地址"
+                >
+Chinese in EN json: workspace.json -> txt_1226: 模型 ID
+Chinese in EN json: workspace.json -> txt_1227: API 密钥
+Chinese in EN json: workspace.json -> txt_1228: {
+                      navigator.clipboard.writeText(formData.apiKey || '');
+                      toast.success('模型服务商 API 密钥复制成功！');
+                    }}
+                    className="p-1 hover:text-blue-400 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-all cursor-pointer"
+                    title="复制 API 密钥"
+                  >
+Chinese in EN json: workspace.json -> txt_1229: 取消
+Chinese in EN json: workspace.json -> txt_1230: 保存
+Chinese in EN json: workspace.json -> txt_1231: 取消 VIP 订阅
+Chinese in EN json: workspace.json -> txt_1232: 您确定要取消 VIP 旗舰订阅服务吗？取消后部分高阶模型及多节点专线将会降级。
+Chinese in EN json: workspace.json -> txt_1233: 保留订阅
+Chinese in EN json: workspace.json -> txt_1234: 确认取消
+Chinese in EN json: workspace.json -> txt_1235: {
+                      navigator.clipboard.writeText(configObj.connection?.token || '');
+                      toast.success('Token 变量值已复制！');
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-blue-400 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+                    title="复制 Token 变量值"
+                  >
+Chinese in EN json: workspace.json -> txt_1236: {
+                      navigator.clipboard.writeText(configObj.connection?.baseUrl || '');
+                      toast.success('接口网关 Base URL 已复制！');
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-blue-400 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+                    title="复制 Base URL"
+                  >
+Chinese in EN json: workspace.json -> txt_1237: 当前上下文
+Chinese in EN json: workspace.json -> txt_1238: {formData.id ? '编辑' : '添加'}
+Chinese in EN json: workspace.json -> txt_1239: 接入参数
+Chinese in EN json: workspace.json -> txt_1240: 自定义配置
+Chinese in EN json: workspace.json -> txt_1241: 自定义配置
+Chinese in EN json: workspace.json -> txt_1242: setFormData({ ...formData, apiKey: e.target.value })}
+              placeholder={providerType === 'claude' ? "只需要填这里，下方配置会自动填充" : "只需要填这里，下方 auth.json 会自动填充"}
+              className="w-full bg-surface border border-divider rounded-xl pl-4 pr-20 py-3 text-sm text-text-main focus:border-blue-500/50 focus:bg-surface transition-all font-mono placeholder:font-sans placeholder:text-text-muted/60"
+            />
+Chinese in EN json: workspace.json -> txt_1243: {providerType === 'claude' ? '请求地址' : 'API 请求地址'}
+Chinese in EN json: workspace.json -> txt_1244: 管理与测速
+Chinese in EN json: workspace.json -> txt_1245: {providerType === 'claude' 
+                ? '填写兼容 Claude API 的服务端点地址，不要以斜杠结尾' 
+                : '填写兼容 OpenAI Response 格式的服务端点地址'}
+Chinese in EN json: workspace.json -> txt_1246: API 格式
+Chinese in EN json: workspace.json -> txt_1247: Anthropic Messages (原生)
+Chinese in EN json: workspace.json -> txt_1248: OpenAI Format (代理转换)
+Chinese in EN json: workspace.json -> txt_1249: 选择供应商 API 的输入格式
+Chinese in EN json: workspace.json -> txt_1250: 认证字段
+Chinese in EN json: workspace.json -> txt_1251: ANTHROPIC_AUTH_TOKEN (默认)
+Chinese in EN json: workspace.json -> txt_1252: 选择写入配置的认证环境变量名
+Chinese in EN json: workspace.json -> txt_1253: 主模型
+Chinese in EN json: workspace.json -> txt_1254: 推理模型 (Thinking)
+Chinese in EN json: workspace.json -> txt_1255: Haiku 默认模型
+Chinese in EN json: workspace.json -> txt_1256: Sonnet 默认模型
+Chinese in EN json: workspace.json -> txt_1257: Opus 默认模型
+Chinese in EN json: workspace.json -> txt_1258: 可选: 指定默认使用的 Claude 模型，留空则使用系统默认。
+Chinese in EN json: workspace.json -> txt_1259: 模型名称
+Chinese in EN json: workspace.json -> txt_1260: 指定使用的模型，将自动更新到 config.toml 中
+Chinese in EN json: workspace.json -> txt_1261: (null);
+  const [isSavedToManager, setIsSavedToManager] = useState(false);
+
+  useEffect(() => {
+    // Look for ?deeplink= parameter or similar in URL query on mount
+    const searchParams = new URLSearchParams(window.location.search);
+    const deeplinkParam = searchParams.get('deeplink');
+
+    if (deeplinkParam) {
+      try {
+        const parsed = parseDeepLink(deeplinkParam);
+        if (parsed) {
+          setPayload(parsed);
+          setIsOpen(true);
+          toast.success('📥 检测到入站生态链 Deep Link 配置，已加载智能配置策略面板！');
+          
+          // Clean the query string in browser history without full page reload
+          const newUrl = window.location.origin + window.location.pathname;
+          window.history.replaceState({}, document.title, newUrl);
+        }
+      } catch (err) {
+        console.error('Failed to auto-parse deep link in interceptor', err);
+      }
+    }
+  }, []);
+
+  if (!isOpen || !payload) return null;
+
+  // Run the configured strategy for a specific tool
+  const handleExecuteStrategy = (toolId: string, toolName: string) => {
+    setSelectedStrategyToolId(toolId);
+    
+    // Instantiate strategy via Strategy Pattern Registry
+    const strategy = ToolConfigRegistry.getStrategy(toolId, toolName);
+    const result = strategy.execute(payload);
+    
+    setActiveStrategyResult(result);
+    if (result.success) {
+      toast.success(result.message);
+    } else {
+      toast.error('策略应用失败，请检查密钥极性！');
+    }
+  };
+
+  // Sync to actual modelkit_api_keys local manager storage
+  const handleSyncToManager = async () => {
+    try {
+      let currentKeys = await workspaceService.getApiKeys();
+
+      // Check if duplicate key already exists
+      const exists = currentKeys.some((k: any) => k.key === payload.apiKey);
+      if (exists) {
+        toast.info('该 API 密钥先前已被导入挂载，无需重复导入。');
+        setIsSavedToManager(true);
+        return;
+      }
+
+      const now = new Date();
+      const formattedTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      const newId = `k-dl-${Date.now()}`;
+      const newApiKey = {
+        id: newId,
+        name: `${payload.name} (DeepLink)`,
+        key: payload.apiKey,
+        baseUrl: payload.baseUrl || '',
+        enabled: true,
+        timeAdded: formattedTime
+      };
+
+      currentKeys = [newApiKey as any, ...currentKeys];
+      await workspaceService.saveApiKeys(currentKeys);
+      
+      setIsSavedToManager(true);
+      toast.success('🎉 API Key 成功同步并注册到本地密钥中转表中！');
+    } catch (e) {
+      console.error('Failed to sync deep link key', e);
+      toast.error('同步失败，请刷新重试');
+    }
+  };
+
+  const handleCopyConfigText = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success('配置密段已复制到剪贴板！');
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1262: 智能网关 Inbound 拦截管理器
+Chinese in EN json: workspace.json -> txt_1263: 检测到入站深度生态链配置，执行策略模式自适应挂载
+Chinese in EN json: workspace.json -> txt_1264: 生态共享秘钥载荷
+Chinese in EN json: workspace.json -> txt_1265: 同步实例命名 (Target Name):
+Chinese in EN json: workspace.json -> txt_1266: 接口端点 (Endpoint BaseUrl):
+Chinese in EN json: workspace.json -> txt_1267: {
+                      navigator.clipboard.writeText(payload.baseUrl || 'https://api.openai.com/v1');
+                      toast.success('入站接口网关 Base URL 已复制到剪贴板！');
+                    }}
+                    className="text-text-muted hover:text-blue-400 p-0.5 rounded transition-all opacity-40 group-hover/url:opacity-100 cursor-pointer"
+                    title="复制此 Base URL"
+                  >
+Chinese in EN json: workspace.json -> txt_1268: 同步描述 (Payload Desc):
+Chinese in EN json: workspace.json -> txt_1269: {payload.description || '无补充描述信息'}
+Chinese in EN json: workspace.json -> txt_1270: 密钥本体 (Credentials):
+Chinese in EN json: workspace.json -> txt_1271: 已同步挂载到本地管理组
+Chinese in EN json: workspace.json -> txt_1272: 导入并注册该密钥到本应用
+Chinese in EN json: workspace.json -> txt_1273: 3. 选择针对特定工具的配置策略
+Chinese in EN json: workspace.json -> txt_1274: 派发策略
+Chinese in EN json: workspace.json -> txt_1275: 编译通过：已经挂载至虚拟文件沙箱
+Chinese in EN json: workspace.json -> txt_1276: handleCopyConfigText(activeStrategyResult.configContent)}
+                            className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-text-muted hover:text-text-main rounded-lg transition-colors"
+                            title="复制最终配置文件"
+                          >
+Chinese in EN json: workspace.json -> txt_1277: 端侧加密、安全合规
+Chinese in EN json: workspace.json -> txt_1278: setIsOpen(false)}
+            className="px-4 py-2 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-text-main font-black rounded-xl text-xs transition-colors cursor-pointer"
+          >
+            完成并关闭
+Chinese in EN json: workspace.json -> txt_1279: 封包深度诊断
+Chinese in EN json: workspace.json -> txt_1280: 关闭
+Chinese in EN json: workspace.json -> txt_1281: 本次会话时间:
+Chinese in EN json: workspace.json -> txt_1282: 报文唯一哈希:
+Chinese in EN json: workspace.json -> txt_1283: 接口服务商 (Provider):
+Chinese in EN json: workspace.json -> txt_1284: {log.provider || "未指定服务商"}
+Chinese in EN json: workspace.json -> txt_1285: 调用模型 (Model ID):
+Chinese in EN json: workspace.json -> txt_1286: {log.model || "未设定具体模型"}
+Chinese in EN json: workspace.json -> txt_1287: 执行耗时:
+Chinese in EN json: workspace.json -> txt_1288: 通信节点IP:
+Chinese in EN json: workspace.json -> txt_1289: 请求参数载荷
+Chinese in EN json: workspace.json -> txt_1290: 中转响应文书
+Chinese in EN json: workspace.json -> txt_1291: 主控网卡解密审计
+Chinese in EN json: workspace.json -> txt_1292: 由于当前环境挂接了本地 Node.js 守护进程（Daemon
+            Co-process），本端支持实时包体完整度校验。若响应超时，请确认底端
+            Provider 与本地密钥参数未曾过期。
+Chinese in EN json: workspace.json -> txt_1293: 嗅探
+Chinese in EN json: workspace.json -> txt_1294: 模拟载荷
+Chinese in EN json: workspace.json -> txt_1295: 搜索路径，工具，模型...
+Chinese in EN json: workspace.json -> txt_1296: 清空记录
+Chinese in EN json: workspace.json -> txt_1297: ('hour');
+
+  // Math totals based on timeframe scale
+  const totalRequests = useMemo(() => {
+    const scale = timeRange === 'today' ? 1 : timeRange === 'yesterday' ? 0.95 : timeRange === '7days' ? 6.8 : 28.5;
+    const base = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.requests, 0);
+    return Math.floor(base * scale);
+  }, [timeRange]);
+
+  const totalTokens = useMemo(() => {
+    const scale = timeRange === 'today' ? 1 : timeRange === 'yesterday' ? 0.92 : timeRange === '7days' ? 6.5 : 27.2;
+    const base = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.tokensIn + curr.tokensOut, 0);
+    return Math.floor(base * scale);
+  }, [timeRange]);
+
+  const totalTokensIn = useMemo(() => {
+    const scale = timeRange === 'today' ? 1 : timeRange === 'yesterday' ? 0.92 : timeRange === '7days' ? 6.5 : 27.2;
+    const base = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.tokensIn, 0);
+    return Math.floor(base * scale);
+  }, [timeRange]);
+
+  const totalTokensOut = useMemo(() => {
+    const scale = timeRange === 'today' ? 1 : timeRange === 'yesterday' ? 0.92 : timeRange === '7days' ? 6.5 : 27.2;
+    const base = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.tokensOut, 0);
+    return Math.floor(base * scale);
+  }, [timeRange]);
+
+  const totalSpend = useMemo(() => {
+    // Standard blended rate: ¥12 per 1M inputs, ¥28 per 1M outputs
+    const cost = (totalTokensIn / 1000000) * 12 + (totalTokensOut / 1000000) * 28;
+    return Number(isNaN(cost) ? 0 : cost.toFixed(2));
+  }, [totalTokensIn, totalTokensOut]);
+
+  const avgLatency = useMemo(() => {
+    const weightSum = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + (curr.latency * curr.requests), 0);
+    const reqSum = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.requests, 0);
+    return Math.floor(weightSum / reqSum);
+  }, []);
+
+  const overallSuccessRate = useMemo(() => {
+    const weightSum = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + (curr.successRate * curr.requests), 0);
+    const reqSum = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.requests, 0);
+    return (weightSum / reqSum).toFixed(2);
+  }, []);
+
+  const currentChartData = useMemo(() => {
+    switch (chartMode) {
+      case 'day': return MOCK_DAILY_DATA;
+      case 'week': return MOCK_WEEKLY_DATA;
+      case 'month': return MOCK_MONTHLY_DATA;
+      case 'hour':
+      default:
+        return MOCK_HOURLY_DATA;
+    }
+  }, [chartMode]);
+
+  const maxRequestsGraph = useMemo(() => Math.max(...currentChartData.map(d => d.requests), 1), [currentChartData]);
+  const maxTokensGraph = useMemo(() => Math.max(...currentChartData.map(d => d.tokens), 1), [currentChartData]);
+
+  const uniqueGateways = useMemo(() => {
+    return Array.from(new Set(MOCK_ENDPOINT_STATS.map(s => s.gateway)));
+  }, []);
+
+  const handleExportData = () => {
+    toast.success('仪表盘使用分析报告已生成并导出 (.csv)');
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1298: 分析区间
+Chinese in EN json: workspace.json -> txt_1299: {[
+            { id: 'today', label: '今天' },
+            { id: 'yesterday', label: '昨天' },
+            { id: '7days', label: '最近 7 天' },
+            { id: '30days', label: '最近 30 天' },
+          ].map(item => (
+Chinese in EN json: workspace.json -> txt_1300: 导出报表
+Chinese in EN json: workspace.json -> txt_1301: 所有的中转网关节点
+Chinese in EN json: workspace.json -> txt_1302: 每秒并发 (QPS):
+Chinese in EN json: workspace.json -> txt_1303: 按模型消耗占比
+Chinese in EN json: workspace.json -> txt_1304: 各类模型在总运行中的份额分配
+Chinese in EN json: workspace.json -> txt_1305: setViewMode('spend')}
+            className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${
+              viewMode === 'spend' 
+                ? 'bg-surface-hover text-text-main shadow-sm' 
+                : 'text-text-muted hover:text-text-main'
+            }`}
+          >
+            金额
+Chinese in EN json: workspace.json -> txt_1306: {hoveredModel !== null ? MOCK_MODEL_DISTRIBUTION[hoveredModel].model : '合计分配'}
+Chinese in EN json: workspace.json -> txt_1307: 今日
+Chinese in EN json: workspace.json -> txt_1308: 汇总
+Chinese in EN json: workspace.json -> txt_1309: 昨日
+Chinese in EN json: workspace.json -> txt_1310: 当月
+Chinese in EN json: workspace.json -> txt_1311: 预估使用金额
+Chinese in EN json: workspace.json -> txt_1312: 请求发生量
+Chinese in EN json: workspace.json -> txt_1313: Token 消耗量
+Chinese in EN json: workspace.json -> txt_1314: 网关性能 (耗时/成功)
+Chinese in EN json: workspace.json -> txt_1315: {chartMode === 'hour' ? '全天每小时请求趋势' : chartMode === 'day' ? '每日历史流量变动' : chartMode === 'week' ? '每周宏观流量分析' : '每月运行总量概览'}
+Chinese in EN json: workspace.json -> txt_1316: {chartMode === 'hour' ? '每隔 2 小时统计流量变动情况，端侧高精度拟合' : chartMode === 'day' ? '按日粒度展现活跃流量，捕获吞吐周期规律' : chartMode === 'week' ? '按周次聚类分析计算，支撑长期运营及规划' : '按自然月聚合展现大块交互总量与趋势变化'}
+Chinese in EN json: workspace.json -> txt_1317: {[
+              { id: 'hour', label: '小时' },
+              { id: 'day', label: '按日' },
+              { id: 'week', label: '按周' },
+              { id: 'month', label: '按月' },
+            ].map(item => (
+Chinese in EN json: workspace.json -> txt_1318: 请求
+Chinese in EN json: workspace.json -> txt_1319: 请求量:
+Chinese in EN json: workspace.json -> txt_1320: {currentChartData[hoveredHour].requests.toLocaleString()} 次
+Chinese in EN json: workspace.json -> txt_1321: Token 吞吐:
+Chinese in EN json: workspace.json -> txt_1322: 平均延迟:
+Chinese in EN json: workspace.json -> txt_1323: (ISystemServiceToken);
+  const [debugLevel, setDebugLevel] = useState('info');
+  const [sslVerification, setSslVerification] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+
+  useEffect(() => {
+    systemService.fetchSettings().then(settings => {
+      setDebugLevel(settings.debugLevel || 'info');
+      setSslVerification(settings.sslVerification || false);
+    });
+  }, [systemService]);
+
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    await systemService.clearCache();
+    setIsClearingCache(false);
+    toast.success('System local router and component download cache flushed successfully! Cache flushed (~48.2 MB saved).');
+  };
+
+  const handleSaveConfigs = async () => {
+    setSaveLoading(true);
+    await systemService.updateSettings({ debugLevel, sslVerification, language, theme: themeMode });
+    setSaveLoading(false);
+    toast.success('系统网关环境参数保存就绪，守护进程已热加载生效。');
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1324: setLanguage('zh')}
+                  className={`px-3 py-1 rounded-lg text-[10px] font-black tracking-wide transition-all cursor-pointer ${
+                    language === 'zh'
+                      ? 'bg-purple-500/10 text-primary-light border border-primary-main/20'
+                      : 'text-text-muted hover:text-text-main border border-transparent'
+                  }`}
+                >
+                  中文
+Chinese in EN json: workspace.json -> txt_1325: 本地存储与包体资源
+Chinese in EN json: workspace.json -> txt_1326: 路由包体与镜像快照缓存
+Chinese in EN json: workspace.json -> txt_1327: 本地存储空间已分配：
+Chinese in EN json: workspace.json -> txt_1328: )}
+                清空文件缓存
+Chinese in EN json: workspace.json -> txt_1329: (null);
+
+  useEffect(() => {
+    workspaceService.getVipStatus().then(status => setIsVip(status.isActive));
+    userService.fetchProfile().then(setProfile);
+  }, [userService]);
+  const [geminiKey, setGeminiKey] = useState('AIzaSyD-Gemini_Core_Node_Secure_Key_Sample663');
+  const [openAIKey, setOpenAIKey] = useState('sk-proj-OpenAI_Proxy_Token_Secure_Demo_Instance__412c9x');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleCopy = (text: string, title: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${title}已成功复制到剪贴板！`);
+  };
+
+  const handleSaveCredentials = () => {
+    setIsSaving(true);
+    setTimeout(() => {
+      setIsSaving(false);
+      toast.success('本地加密开发者密钥库保存成功！');
+    }, 850);
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1330: 个人开发者中心
+Chinese in EN json: workspace.json -> txt_1331: VIP 旗舰
+Chinese in EN json: workspace.json -> txt_1332: 运行节点身份
+Chinese in EN json: workspace.json -> txt_1333: 开发者哈希号 / ID
+Chinese in EN json: workspace.json -> txt_1334: handleCopy('mk_usr_90a18f4d92eb', '开发者身份哈希')}
+                  className="p-1 hover:bg-black/5 dark:hover:bg-white/5 hover:text-text-main rounded text-text-muted transition-colors"
+                >
+Chinese in EN json: workspace.json -> txt_1335: 当前您正在开发调试状态下运行，具有网卡穿透、本地 Daemon 守护进程下发控制及 API Key 密钥热装载等全栈系统权限。
+Chinese in EN json: workspace.json -> txt_1336: 独立 API 访问凭据管理
+Chinese in EN json: workspace.json -> txt_1337: }
+                    {showGemini ? '隐藏' : '显示'}
+Chinese in EN json: workspace.json -> txt_1338: }
+                    {showOpenAI ? '隐藏' : '显示'}
+Chinese in EN json: workspace.json -> txt_1339: )}
+                加密保存凭证
+Chinese in EN json: workspace.json -> txt_1340: 收银台 - 核对订阅清单
+Chinese in EN json: workspace.json -> txt_1341: 商品名称：
+Chinese in EN json: workspace.json -> txt_1342: 订阅周期：
+Chinese in EN json: workspace.json -> txt_1343: {billingCycle === 'yearly' ? '按年自动续期 (享7折优惠)' : '按月自动续期'}
+Chinese in EN json: workspace.json -> txt_1344: 应付总计：
+Chinese in EN json: workspace.json -> txt_1345: 选择安全支付载体
+Chinese in EN json: workspace.json -> txt_1346: 支付宝支付
+Chinese in EN json: workspace.json -> txt_1347: 微信支付
+Chinese in EN json: workspace.json -> txt_1348: 银联 / 信用卡
+Chinese in EN json: workspace.json -> txt_1349: 双向安全加密通信中
+Chinese in EN json: workspace.json -> txt_1350: 请使用{paymentMethod === 'alipay' ? '支付宝' : '微信'}扫描二维码完成支付
+Chinese in EN json: workspace.json -> txt_1351: 该页面仅用于沙箱模拟联调测试，不会发生真实扣费 &nbsp;|&nbsp; 剩余有效时间
+Chinese in EN json: workspace.json -> txt_1352: 卡片号码 (Card Number)
+Chinese in EN json: workspace.json -> txt_1353: 有效截期 (Expiry)
+Chinese in EN json: workspace.json -> txt_1354: 安全数字码 (CVV)
+Chinese in EN json: workspace.json -> txt_1355: 🛡️ 金融沙箱环境已默认代扣。直接点击下方“模拟支付完成”即可注入秘钥库验证。
+Chinese in EN json: workspace.json -> txt_1356: 正在向网关安全套接字发送支付鉴权...
+Chinese in EN json: workspace.json -> txt_1357: [INFO] 正在写入本地 Immutable 密钥组及配额配给...
+Chinese in EN json: workspace.json -> txt_1358: 尊享开发者订阅特权开通成功！
+Chinese in EN json: workspace.json -> txt_1359: 感谢您支持 ModelKit 生态系统建设！您的全局物理路由 QPS 限额已提升至最高档，全网高级模型矩阵已无障碍完全装配就绪。
+Chinese in EN json: workspace.json -> txt_1360: 已热装载 VIP 密钥凭据。再次向网关发起请求时免于降级限制。
+Chinese in EN json: workspace.json -> txt_1361: 开始尊享特权
+Chinese in EN json: workspace.json -> txt_1362: 金融级 AES-256 私钥保障
+Chinese in EN json: workspace.json -> txt_1363: 取消订单
+Chinese in EN json: workspace.json -> txt_1364: 模拟支付完成
+Chinese in EN json: workspace.json -> txt_1365: 已开启尊享会员
+Chinese in EN json: workspace.json -> txt_1366: 升级 ModelKit VIP 旗舰版
+Chinese in EN json: workspace.json -> txt_1367: 极智延迟，大厂高并发大模型免排队专线。通过升级为您解锁全场景无限量高级模型连接，免去频繁的环境鉴权干扰。
+Chinese in EN json: workspace.json -> txt_1368: setBillingCycle('monthly')}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+                  billingCycle === 'monthly'
+                    ? 'bg-surface-hover text-text-main shadow-md'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                按月订阅
+Chinese in EN json: workspace.json -> txt_1369: setBillingCycle('yearly')}
+                className={`relative px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                  billingCycle === 'yearly'
+                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                按年订阅
+Chinese in EN json: workspace.json -> txt_1370: 省30%
+Chinese in EN json: workspace.json -> txt_1371: 您目前已开通
+Chinese in EN json: workspace.json -> txt_1372: {vipStatusData.plan || '旗舰版'}
+Chinese in EN json: workspace.json -> txt_1373: 尊享会员
+Chinese in EN json: workspace.json -> txt_1374: 核心链路已成功切换至 VIP 高带宽专属对等中转节点。
+Chinese in EN json: workspace.json -> txt_1375: onNavigate?.('user-profile')}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-divider border border-divider-strong hover:bg-neutral-800 text-text-main transition-colors cursor-pointer"
+              >
+                前往个人中心
+Chinese in EN json: workspace.json -> txt_1376: 取消订阅
+Chinese in EN json: workspace.json -> txt_1377: {plans.map(plan => {
+              const price = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
+              const periodLabel = billingCycle === 'yearly' ? '/ 年' : '/ 月';
+              const previousPrice = billingCycle === 'yearly' ? Math.round(plan.monthlyPrice * 12) : null;
+
+              return (
+Chinese in EN json: workspace.json -> txt_1378: 包含特权权益 :
+Chinese in EN json: workspace.json -> txt_1379: handleOpenCheckout(plan.id, plan.name, plan.monthlyPrice, plan.yearlyPrice)}
+                    className={`w-full py-3 px-4 rounded-xl mt-8 text-xs font-bold transition-all text-center select-none cursor-pointer ${plan.btnStyle}`}
+                  >
+                    {plan.id === 'enterprise' ? '定制专属企业通道' : '立即订阅开通'}
+Chinese in EN json: workspace.json -> txt_1380: 毫秒级连接率
+Chinese in EN json: workspace.json -> txt_1381: 骨干机房对等节点，平均降低接口延迟 35% 以上
+Chinese in EN json: workspace.json -> txt_1382: 金融级数据安全
+Chinese in EN json: workspace.json -> txt_1383: 双向多通道高密度加密链路传输，对请求报文严格清洗
+Chinese in EN json: workspace.json -> txt_1384: 无额外资源溢出度
+Chinese in EN json: workspace.json -> txt_1385: 智能压缩多路，自动命中重复提示词，降本高至 40%
+Chinese in EN json: workspace.json -> txt_1386: 多组别开发者互认
+Chinese in EN json: workspace.json -> txt_1387: 多节点自动热灾备与主备切换，保持常备调试通顺
+Chinese in EN json: workspace.json -> txt_1388: 企业级物理路由节点自建承诺
+Chinese in EN json: workspace.json -> txt_1389: 支持能力维度
+Chinese in EN json: workspace.json -> txt_1390: 免费标准版
+Chinese in EN json: workspace.json -> txt_1391: 旗舰开发者专业版 (推荐)
+Chinese in EN json: workspace.json -> txt_1392: 私有化企业版
+Chinese in EN json: workspace.json -> txt_1393: 最大物理挂载节点数
+Chinese in EN json: workspace.json -> txt_1394: 1 个代理节点
+Chinese in EN json: workspace.json -> txt_1395: 无限物理隧道负载
+Chinese in EN json: workspace.json -> txt_1396: 按集群物理台数授权
+Chinese in EN json: workspace.json -> txt_1397: 主流大模型涵盖面
+Chinese in EN json: workspace.json -> txt_1398: 经典 GPT-4o-mini 等 5 款
+Chinese in EN json: workspace.json -> txt_1399: 全模型矩阵 (o3-mini, Claude Real)
+Chinese in EN json: workspace.json -> txt_1400: 包括定制化私有大模型、LoRA挂载
+Chinese in EN json: workspace.json -> txt_1401: 通信专线质量 SLA
+Chinese in EN json: workspace.json -> txt_1402: 公网默认中转 (不保证在线)
+Chinese in EN json: workspace.json -> txt_1403: VIP 亚太及欧美骨干专线自适应
+Chinese in EN json: workspace.json -> txt_1404: 专属独立中继代理器 99.99%
+Chinese in EN json: workspace.json -> txt_1405: 日常 API 限流阈值
+Chinese in EN json: workspace.json -> txt_1406: 300 次调用 / 1G 数据限制
+Chinese in EN json: workspace.json -> txt_1407: 全无限次网关通信调阅
+Chinese in EN json: workspace.json -> txt_1408: 无并发无配额限制
+Chinese in EN json: workspace.json -> txt_1409: 故障响应与支持
+Chinese in EN json: workspace.json -> txt_1410: 社群排排队协助
+Chinese in EN json: workspace.json -> txt_1411: 2 小时工单专家诊断
+Chinese in EN json: workspace.json -> txt_1412: 15 分钟 SLA 级专人支持 / 电话直连
+Chinese in EN json: workspace.json -> txt_1015: (null);
+
+  useEffect(() => {
+    userService.fetchProfile().then(setProfile);
+  }, [userService]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSignOut = () => {
+    toast.success('会话已锁。本地终端保持驻留。');
+    setIsOpen(false);
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1016: {
+                setActiveTab('tools');
+                // Auto active first tool if non-setting view is empty
+                if (tools.length > 0 && (activeToolId === 'system-settings' || activeToolId === 'user-profile')) {
+                  setActiveToolId(tools[0].id);
+                }
+              }}
+              className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all relative ${
+                activeTab === 'tools' 
+                  ? 'text-blue-400 bg-blue-600/10 border border-blue-500/25 shadow-inner' 
+                  : 'text-text-muted hover:text-text-main hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'
+              }`}
+              title="工具网络 / Agent Tools"
+            >
+Chinese in EN json: workspace.json -> txt_1017: {
+              setActiveTab('vip');
+            }}
+            className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-all relative group ${
+              activeTab === 'vip' 
+                ? 'text-amber-400 bg-amber-600/15 border border-amber-500/30 shadow-[inset_0_1px_rgba(255,255,255,0.05),0_1px_8px_rgba(245,158,11,0.2)]' 
+                : 'text-text-muted hover:text-amber-400 hover:bg-amber-500/5 border border-transparent'
+            }`}
+            title="订阅 VIP 会员"
+          >
+Chinese in EN json: workspace.json -> txt_1018: onUninstall?.(activeTool.id)}
+                    className="px-2.5 py-0.5 rounded bg-red-500/10 border border-red-500/20 hover:border-red-500/50 text-red-500 hover:text-red-400 text-xs font-semibold transition-all cursor-pointer select-none"
+                  >
+                    卸载
+Chinese in EN json: workspace.json -> txt_1019: {
+                      navigator.clipboard.writeText(formData.key);
+                      toast.success('输入的 API 密钥已复制！');
+                    }}
+                    className="p-1 hover:text-blue-400 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-all cursor-pointer"
+                    title="复制 API 密钥"
+                  >
+Chinese in EN json: workspace.json -> txt_1020: {
+                      navigator.clipboard.writeText(formData.baseUrl);
+                      toast.success('输入的 API 密钥自定义端点已复制！');
+                    }}
+                    className="p-1 text-text-muted hover:text-blue-400 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-all cursor-pointer"
+                    title="复制 Base URL"
+                  >
+Chinese in EN json: workspace.json -> txt_1021: {
+                if (onInstall) {
+                  onInstall(activeTool.id, selectedType);
+                }
+                onClose();
+              }}
+              className="px-5 py-2 rounded-lg text-sm font-bold bg-blue-600 hover:bg-blue-500 text-white transition-all shadow-[0_4px_16px_rgba(37,99,235,0.2)]"
+            >
+              继续部署 / Deploy
+Chinese in EN json: workspace.json -> txt_1022: {
+                    navigator.clipboard.writeText(formData.openaiUrl || '');
+                    toast.success('OpenAI 接口地址已复制到剪贴板！');
+                  }}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-blue-400 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+                  title="复制 OpenAI 地址"
+                >
+Chinese in EN json: workspace.json -> txt_1023: {
+                    navigator.clipboard.writeText(formData.anthropicUrl || '');
+                    toast.success('Anthropic 接口地址已复制到剪贴板！');
+                  }}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-blue-400 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+                  title="复制 Anthropic 地址"
+                >
+Chinese in EN json: workspace.json -> txt_1024: {
+                      navigator.clipboard.writeText(formData.apiKey || '');
+                      toast.success('模型服务商 API 密钥复制成功！');
+                    }}
+                    className="p-1 hover:text-blue-400 hover:bg-black/5 dark:hover:bg-white/5 rounded transition-all cursor-pointer"
+                    title="复制 API 密钥"
+                  >
+Chinese in EN json: workspace.json -> txt_1025: {
+                      navigator.clipboard.writeText(configObj.connection?.token || '');
+                      toast.success('Token 变量值已复制！');
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-blue-400 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+                    title="复制 Token 变量值"
+                  >
+Chinese in EN json: workspace.json -> txt_1026: {
+                      navigator.clipboard.writeText(configObj.connection?.baseUrl || '');
+                      toast.success('接口网关 Base URL 已复制！');
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-blue-400 p-1 rounded hover:bg-black/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+                    title="复制 Base URL"
+                  >
+Chinese in EN json: workspace.json -> txt_1027: setFormData({ ...formData, apiKey: e.target.value })}
+              placeholder={providerType === 'claude' ? "只需要填这里，下方配置会自动填充" : "只需要填这里，下方 auth.json 会自动填充"}
+              className="w-full bg-surface border border-divider rounded-xl pl-4 pr-20 py-3 text-sm text-text-main focus:border-blue-500/50 focus:bg-surface transition-all font-mono placeholder:font-sans placeholder:text-text-muted/60"
+            />
+Chinese in EN json: workspace.json -> txt_1028: {providerType === 'claude' 
+                ? '填写兼容 Claude API 的服务端点地址，不要以斜杠结尾' 
+                : '填写兼容 OpenAI Response 格式的服务端点地址'}
+Chinese in EN json: workspace.json -> txt_1029: (null);
+  const [isSavedToManager, setIsSavedToManager] = useState(false);
+
+  useEffect(() => {
+    // Look for ?deeplink= parameter or similar in URL query on mount
+    const searchParams = new URLSearchParams(window.location.search);
+    const deeplinkParam = searchParams.get('deeplink');
+
+    if (deeplinkParam) {
+      try {
+        const parsed = parseDeepLink(deeplinkParam);
+        if (parsed) {
+          setPayload(parsed);
+          setIsOpen(true);
+          toast.success('📥 检测到入站生态链 Deep Link 配置，已加载智能配置策略面板！');
+          
+          // Clean the query string in browser history without full page reload
+          const newUrl = window.location.origin + window.location.pathname;
+          window.history.replaceState({}, document.title, newUrl);
+        }
+      } catch (err) {
+        console.error('Failed to auto-parse deep link in interceptor', err);
+      }
+    }
+  }, []);
+
+  if (!isOpen || !payload) return null;
+
+  // Run the configured strategy for a specific tool
+  const handleExecuteStrategy = (toolId: string, toolName: string) => {
+    setSelectedStrategyToolId(toolId);
+    
+    // Instantiate strategy via Strategy Pattern Registry
+    const strategy = ToolConfigRegistry.getStrategy(toolId, toolName);
+    const result = strategy.execute(payload);
+    
+    setActiveStrategyResult(result);
+    if (result.success) {
+      toast.success(result.message);
+    } else {
+      toast.error('策略应用失败，请检查密钥极性！');
+    }
+  };
+
+  // Sync to actual modelkit_api_keys local manager storage
+  const handleSyncToManager = async () => {
+    try {
+      let currentKeys = await workspaceService.getApiKeys();
+
+      // Check if duplicate key already exists
+      const exists = currentKeys.some((k: any) => k.key === payload.apiKey);
+      if (exists) {
+        toast.info('该 API 密钥先前已被导入挂载，无需重复导入。');
+        setIsSavedToManager(true);
+        return;
+      }
+
+      const now = new Date();
+      const formattedTime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      const newId = `k-dl-${Date.now()}`;
+      const newApiKey = {
+        id: newId,
+        name: `${payload.name} (DeepLink)`,
+        key: payload.apiKey,
+        baseUrl: payload.baseUrl || '',
+        enabled: true,
+        timeAdded: formattedTime
+      };
+
+      currentKeys = [newApiKey as any, ...currentKeys];
+      await workspaceService.saveApiKeys(currentKeys);
+      
+      setIsSavedToManager(true);
+      toast.success('🎉 API Key 成功同步并注册到本地密钥中转表中！');
+    } catch (e) {
+      console.error('Failed to sync deep link key', e);
+      toast.error('同步失败，请刷新重试');
+    }
+  };
+
+  const handleCopyConfigText = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success('配置密段已复制到剪贴板！');
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1030: {
+                      navigator.clipboard.writeText(payload.baseUrl || 'https://api.openai.com/v1');
+                      toast.success('入站接口网关 Base URL 已复制到剪贴板！');
+                    }}
+                    className="text-text-muted hover:text-blue-400 p-0.5 rounded transition-all opacity-40 group-hover/url:opacity-100 cursor-pointer"
+                    title="复制此 Base URL"
+                  >
+Chinese in EN json: workspace.json -> txt_1031: handleCopyConfigText(activeStrategyResult.configContent)}
+                            className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 text-text-muted hover:text-text-main rounded-lg transition-colors"
+                            title="复制最终配置文件"
+                          >
+Chinese in EN json: workspace.json -> txt_1032: setIsOpen(false)}
+            className="px-4 py-2 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-text-main font-black rounded-xl text-xs transition-colors cursor-pointer"
+          >
+            完成并关闭
+Chinese in EN json: workspace.json -> txt_1033: 由于当前环境挂接了本地 Node.js 守护进程（Daemon
+            Co-process），本端支持实时包体完整度校验。若响应超时，请确认底端
+            Provider 与本地密钥参数未曾过期。
+Chinese in EN json: workspace.json -> txt_1034: ('hour');
+
+  // Math totals based on timeframe scale
+  const totalRequests = useMemo(() => {
+    const scale = timeRange === 'today' ? 1 : timeRange === 'yesterday' ? 0.95 : timeRange === '7days' ? 6.8 : 28.5;
+    const base = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.requests, 0);
+    return Math.floor(base * scale);
+  }, [timeRange]);
+
+  const totalTokens = useMemo(() => {
+    const scale = timeRange === 'today' ? 1 : timeRange === 'yesterday' ? 0.92 : timeRange === '7days' ? 6.5 : 27.2;
+    const base = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.tokensIn + curr.tokensOut, 0);
+    return Math.floor(base * scale);
+  }, [timeRange]);
+
+  const totalTokensIn = useMemo(() => {
+    const scale = timeRange === 'today' ? 1 : timeRange === 'yesterday' ? 0.92 : timeRange === '7days' ? 6.5 : 27.2;
+    const base = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.tokensIn, 0);
+    return Math.floor(base * scale);
+  }, [timeRange]);
+
+  const totalTokensOut = useMemo(() => {
+    const scale = timeRange === 'today' ? 1 : timeRange === 'yesterday' ? 0.92 : timeRange === '7days' ? 6.5 : 27.2;
+    const base = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.tokensOut, 0);
+    return Math.floor(base * scale);
+  }, [timeRange]);
+
+  const totalSpend = useMemo(() => {
+    // Standard blended rate: ¥12 per 1M inputs, ¥28 per 1M outputs
+    const cost = (totalTokensIn / 1000000) * 12 + (totalTokensOut / 1000000) * 28;
+    return Number(isNaN(cost) ? 0 : cost.toFixed(2));
+  }, [totalTokensIn, totalTokensOut]);
+
+  const avgLatency = useMemo(() => {
+    const weightSum = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + (curr.latency * curr.requests), 0);
+    const reqSum = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.requests, 0);
+    return Math.floor(weightSum / reqSum);
+  }, []);
+
+  const overallSuccessRate = useMemo(() => {
+    const weightSum = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + (curr.successRate * curr.requests), 0);
+    const reqSum = MOCK_ENDPOINT_STATS.reduce((acc, curr) => acc + curr.requests, 0);
+    return (weightSum / reqSum).toFixed(2);
+  }, []);
+
+  const currentChartData = useMemo(() => {
+    switch (chartMode) {
+      case 'day': return MOCK_DAILY_DATA;
+      case 'week': return MOCK_WEEKLY_DATA;
+      case 'month': return MOCK_MONTHLY_DATA;
+      case 'hour':
+      default:
+        return MOCK_HOURLY_DATA;
+    }
+  }, [chartMode]);
+
+  const maxRequestsGraph = useMemo(() => Math.max(...currentChartData.map(d => d.requests), 1), [currentChartData]);
+  const maxTokensGraph = useMemo(() => Math.max(...currentChartData.map(d => d.tokens), 1), [currentChartData]);
+
+  const uniqueGateways = useMemo(() => {
+    return Array.from(new Set(MOCK_ENDPOINT_STATS.map(s => s.gateway)));
+  }, []);
+
+  const handleExportData = () => {
+    toast.success('仪表盘使用分析报告已生成并导出 (.csv)');
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1035: {[
+            { id: 'today', label: '今天' },
+            { id: 'yesterday', label: '昨天' },
+            { id: '7days', label: '最近 7 天' },
+            { id: '30days', label: '最近 30 天' },
+          ].map(item => (
+Chinese in EN json: workspace.json -> txt_1036: setViewMode('spend')}
+            className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${
+              viewMode === 'spend' 
+                ? 'bg-surface-hover text-text-main shadow-sm' 
+                : 'text-text-muted hover:text-text-main'
+            }`}
+          >
+            金额
+Chinese in EN json: workspace.json -> txt_1037: {[
+              { id: 'hour', label: '小时' },
+              { id: 'day', label: '按日' },
+              { id: 'week', label: '按周' },
+              { id: 'month', label: '按月' },
+            ].map(item => (
+Chinese in EN json: workspace.json -> txt_1038: (ISystemServiceToken);
+  const [debugLevel, setDebugLevel] = useState('info');
+  const [sslVerification, setSslVerification] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+
+  useEffect(() => {
+    systemService.fetchSettings().then(settings => {
+      setDebugLevel(settings.debugLevel || 'info');
+      setSslVerification(settings.sslVerification || false);
+    });
+  }, [systemService]);
+
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    await systemService.clearCache();
+    setIsClearingCache(false);
+    toast.success('System local router and component download cache flushed successfully! Cache flushed (~48.2 MB saved).');
+  };
+
+  const handleSaveConfigs = async () => {
+    setSaveLoading(true);
+    await systemService.updateSettings({ debugLevel, sslVerification, language, theme: themeMode });
+    setSaveLoading(false);
+    toast.success('系统网关环境参数保存就绪，守护进程已热加载生效。');
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1039: setLanguage('zh')}
+                  className={`px-3 py-1 rounded-lg text-[10px] font-black tracking-wide transition-all cursor-pointer ${
+                    language === 'zh'
+                      ? 'bg-purple-500/10 text-primary-light border border-primary-main/20'
+                      : 'text-text-muted hover:text-text-main border border-transparent'
+                  }`}
+                >
+                  中文
+Chinese in EN json: workspace.json -> txt_1040: )}
+                清空文件缓存
+Chinese in EN json: workspace.json -> txt_1041: (null);
+
+  useEffect(() => {
+    workspaceService.getVipStatus().then(status => setIsVip(status.isActive));
+    userService.fetchProfile().then(setProfile);
+  }, [userService]);
+  const [geminiKey, setGeminiKey] = useState('AIzaSyD-Gemini_Core_Node_Secure_Key_Sample663');
+  const [openAIKey, setOpenAIKey] = useState('sk-proj-OpenAI_Proxy_Token_Secure_Demo_Instance__412c9x');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleCopy = (text: string, title: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${title}已成功复制到剪贴板！`);
+  };
+
+  const handleSaveCredentials = () => {
+    setIsSaving(true);
+    setTimeout(() => {
+      setIsSaving(false);
+      toast.success('本地加密开发者密钥库保存成功！');
+    }, 850);
+  };
+
+  return (
+Chinese in EN json: workspace.json -> txt_1042: handleCopy('mk_usr_90a18f4d92eb', '开发者身份哈希')}
+                  className="p-1 hover:bg-black/5 dark:hover:bg-white/5 hover:text-text-main rounded text-text-muted transition-colors"
+                >
+Chinese in EN json: workspace.json -> txt_1043: }
+                    {showGemini ? '隐藏' : '显示'}
+Chinese in EN json: workspace.json -> txt_1044: }
+                    {showOpenAI ? '隐藏' : '显示'}
+Chinese in EN json: workspace.json -> txt_1045: )}
+                加密保存凭证
+Chinese in EN json: workspace.json -> txt_1046: setBillingCycle('monthly')}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
+                  billingCycle === 'monthly'
+                    ? 'bg-surface-hover text-text-main shadow-md'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                按月订阅
+Chinese in EN json: workspace.json -> txt_1047: setBillingCycle('yearly')}
+                className={`relative px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                  billingCycle === 'yearly'
+                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                    : 'text-text-muted hover:text-text-main'
+                }`}
+              >
+                按年订阅
+Chinese in EN json: workspace.json -> txt_1048: onNavigate?.('user-profile')}
+                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-divider border border-divider-strong hover:bg-neutral-800 text-text-main transition-colors cursor-pointer"
+              >
+                前往个人中心
+Chinese in EN json: workspace.json -> txt_1049: {plans.map(plan => {
+              const price = billingCycle === 'yearly' ? plan.yearlyPrice : plan.monthlyPrice;
+              const periodLabel = billingCycle === 'yearly' ? '/ 年' : '/ 月';
+              const previousPrice = billingCycle === 'yearly' ? Math.round(plan.monthlyPrice * 12) : null;
+
+              return (
+Chinese in EN json: workspace.json -> txt_1050: handleOpenCheckout(plan.id, plan.name, plan.monthlyPrice, plan.yearlyPrice)}
+                    className={`w-full py-3 px-4 rounded-xl mt-8 text-xs font-bold transition-all text-center select-none cursor-pointer ${plan.btnStyle}`}
+                  >
+                    {plan.id === 'enterprise' ? '定制专属企业通道' : '立即订阅开通'}
+Found 466 keys with Chinese in EN locales.
